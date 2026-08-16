@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>机械臂 · 官网</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">机械臂</a>
+  <div class="links">
+    <a href="/" class="on">首页</a>
+    <a href="/control">遥控</a>
+    <a href="/messages">留言</a>
+    <a href="/download">下载</a>
+  </div>
+</nav>
+<div class="container">
+  <h1>桌面机械臂</h1>
+  <p class="subtitle">ESP32-S3 · 5 自由度 · 云端遥控</p>
+
+  <div class="c">
+    <div class="n">关于这个项目</div>
+    <p class="body" style="margin-top:8px">一台用 ESP32-S3 驱动的 5 自由度桌面机械臂，支持网页远程控制。任何人打开浏览器就能玩——拖动滑块，机械臂就跟着动。</p>
+  </div>
+
+  <a href="/control" class="c dl">
+    <div class="info"><div class="name">在线遥控</div><div class="desc">打开网页，拖动滑块控制机械臂</div></div>
+  </a>
+  <a href="/messages" class="c dl">
+    <div class="info"><div class="name">给我留言</div><div class="desc">说点什么，我会回复你</div></div>
+  </a>
+  <a href="/download" class="c dl">
+    <div class="info"><div class="name">下载 / 安装</div><div class="desc">把遥控器装进手机，或下载资料</div></div>
+  </a>
+
+  <div class="footer">一个软硬件结合的小项目</div>
+</div>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}
+</script>
+</body>
+</html>
