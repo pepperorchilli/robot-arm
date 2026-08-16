@@ -1,2 +1,11 @@
 # macOS
 .DS_Store
+
+# Node 依赖
+node_modules/
+
+# 运行时数据（留言等）
+server/data/
+
+# 配置文件（含密码/密钥，不提交；用 config.example.js 作模板）
+server/config.js
