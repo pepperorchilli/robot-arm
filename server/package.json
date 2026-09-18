@@ -4,10 +4,14 @@
   "description": "机械臂云控制服务器 + 产品网站（遥控 / 留言板 / 下载 / PWA）",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "migrate": "node migrate.js",
+    "explain": "node explain-demo.js",
+    "init-db": "mysql -u root < schema.sql"
   },
   "dependencies": {
     "express": "^4.19.2",
+    "mysql2": "^3.11.0",
     "ws": "^8.18.0"
   }
 }

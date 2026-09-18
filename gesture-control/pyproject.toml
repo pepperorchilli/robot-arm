@@ -1,0 +1,13 @@
+[project]
+name = "gesture-control"
+version = "0.1.0"
+description = "手势识别控制机械臂（MediaPipe + OpenCV）"
+readme = "README.md"
+# 注意：必须用 3.12 及以下。MediaPipe 1.0 在 macOS 上会崩（DrishtiMetalHelper），
+# 所以锁在稳定的 0.10.x；而 0.10.x 只支持到 Python 3.12。
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mediapipe==0.10.21",
+    "opencv-python>=4.9",
+    "requests>=2.31",
+]
