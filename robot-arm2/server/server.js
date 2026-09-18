@@ -72,7 +72,72 @@ function requireAuth(req, res, next) {
   res.status(401).send('需要登录后才能控制机械臂');
 }
 
+// ==================== 登录限流 ====================
+//
+// 登录密码可能设得比较短，而接口暴露在公网 —— 没有限流的话，
+// 脚本每秒能试几千次，短密码几分钟就被爆破。
+//
+// 策略：同一 IP 在 10 分钟内失败 5 次，封禁 15 分钟。
+// 存内存即可（重启清空，对个人站点够用）。
+
+const loginAttempts = new Map();   // ip -> { count, firstAt, blockedUntil }
+const MAX_ATTEMPTS = 5;
+const ATTEMPT_WINDOW = 10 * 60 * 1000;   // 计数窗口：10 分钟
+const BLOCK_DURATION = 15 * 60 * 1000;   // 封禁时长：15 分钟
+
+function clientIp(req) {
+  // 前面有 Nginx，真实 IP 在 X-Forwarded-For 里（需配合 app.set('trust proxy')）
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip);
+  if (!rec) return { allowed: true };
+
+  if (rec.blockedUntil && now < rec.blockedUntil) {
+    return { allowed: false, retryAfterSec: Math.ceil((rec.blockedUntil - now) / 1000) };
+  }
+  return { allowed: true };
+}
+
+function recordFailure(ip) {
+  const now = Date.now();
+  let rec = loginAttempts.get(ip);
+
+  // 窗口过期就重新计数
+  if (!rec || now - rec.firstAt > ATTEMPT_WINDOW) {
+    rec = { count: 0, firstAt: now, blockedUntil: 0 };
+  }
+
+  rec.count += 1;
+  if (rec.count >= MAX_ATTEMPTS) {
+    rec.blockedUntil = now + BLOCK_DURATION;
+    console.log(`🚫 IP ${ip} 登录失败 ${rec.count} 次，封禁 15 分钟`);
+  }
+  loginAttempts.set(ip, rec);
+}
+
+function clearFailures(ip) {
+  loginAttempts.delete(ip);
+}
+
+// 定期清理过期记录，避免内存无限增长
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of loginAttempts) {
+    const expired = now - rec.firstAt > ATTEMPT_WINDOW;
+    const unblocked = !rec.blockedUntil || now > rec.blockedUntil;
+    if (expired && unblocked) loginAttempts.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
 const app = express();
+
+// 前面挂着 Nginx，要信任 X-Forwarded-For 才能拿到真实客户端 IP
+// （登录限流依赖它，否则所有请求都会被算成同一个 IP）
+app.set('trust proxy', true);
+
 app.use(express.json()); // 解析 POST 的 JSON body
 
 // ---------- API 文档 ----------
@@ -116,10 +181,24 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
  *         description: 密码错误
  */
 app.post('/api/login', (req, res) => {
+  const ip = clientIp(req);
+
+  // 先看是否已被封禁
+  const limit = checkRateLimit(ip);
+  if (!limit.allowed) {
+    res.setHeader('Retry-After', limit.retryAfterSec);
+    return res.status(429).json({
+      error: `尝试过于频繁，请 ${Math.ceil(limit.retryAfterSec / 60)} 分钟后再试`,
+    });
+  }
+
   const { password } = req.body || {};
   if (password !== config.ADMIN_PASSWORD) {
+    recordFailure(ip);
     return res.status(401).json({ error: '密码错误' });
   }
+
+  clearFailures(ip);   // 登录成功，清空失败计数
   const token = issueToken();
   // httpOnly：JS 读不到，防 XSS 窃取；sameSite=lax：防 CSRF
   res.setHeader('Set-Cookie',
