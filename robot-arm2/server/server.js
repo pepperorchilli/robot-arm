@@ -45,11 +45,11 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
  *       - in: query
  *         name: servo
  *         required: true
- *         description: 舵机编号
+ *         description: 舵机编号（0=底座 1=肩部 2=肘部 3=腕俯仰 4=腕旋转 5=夹爪）
  *         schema:
  *           type: integer
  *           minimum: 0
- *           maximum: 4
+ *           maximum: 5
  *           example: 0
  *       - in: query
  *         name: angle

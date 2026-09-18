@@ -46,11 +46,11 @@
 #define SERVO_TX   17
 #define SERVO_BAUD 1000000     // STS3215 出厂默认 1Mbps
 
-const int NUM = 5;
-// 舵机 ID，顺序 = 底座/大臂/小臂/手腕/夹爪
-// ⚠️ 出厂全是 1，必须逐个改成 1~5，否则总线冲突
-uint8_t SERVO_ID[NUM] = {1, 2, 3, 4, 5};
-const char* NAMES[NUM] = {"底座", "大臂", "小臂", "手腕", "夹爪"};
+const int NUM = 6;   // SO-ARM101 有 6 个关节
+// 舵机 ID，按物理顺序从下到上：底座 → 肩 → 肘 → 腕俯仰 → 腕旋转 → 夹爪
+// ⚠️ 出厂全是 1，必须逐个改成 1~6，否则总线冲突
+uint8_t SERVO_ID[NUM] = {1, 2, 3, 4, 5, 6};
+const char* NAMES[NUM] = {"底座", "肩部", "肘部", "腕俯仰", "腕旋转", "夹爪"};
 
 const uint16_t POS_CENTER = 2048;   // 0~4095 对应 0~360°，2048 是 180°（机械中位）
 const int MOVE_TIME = 400;          // 到达目标的毫秒数（舵机内部平滑）

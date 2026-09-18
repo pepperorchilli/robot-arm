@@ -62,10 +62,10 @@
 const char* WIFI_SSID = "RobotArm-Test";
 const char* WIFI_PASS = "12345678";
 
-const int NUM = 5;
-// 改好 ID 后填这里，顺序 = 底座/大臂/小臂/手腕/夹爪
-uint8_t SERVO_ID[NUM] = {1, 2, 3, 4, 5};
-const char* NAMES[NUM] = {"底座", "大臂", "小臂", "手腕", "夹爪"};
+const int NUM = 6;   // SO-ARM101 有 6 个关节
+// 改好 ID 后填这里，顺序 = SO-ARM101 自下而上
+uint8_t SERVO_ID[NUM] = {1, 2, 3, 4, 5, 6};
+const char* NAMES[NUM] = {"底座", "肩部", "肘部", "腕俯仰", "腕旋转", "夹爪"};
 
 const uint16_t POS_MIN = 0;         // 0°
 const uint16_t POS_MAX = 4095;      // 360°
@@ -249,11 +249,11 @@ button{width:100%;padding:12px;border:none;border-radius:12px;background:#ff6b6b
 </style></head><body><h2>机械臂（总线舵机）</h2>
 <div id="cards"></div><button onclick="fetch('/center')">全部回中</button>
 <script>
-const NAMES=['底座','大臂','小臂','手腕','夹爪'];
+const NAMES=['底座','肩部','肘部','腕俯仰','腕旋转','夹爪'];
 let html='';
-for(let i=0;i<5;i++){html+='<div class="c"><div class="h"><div class="n">'+NAMES[i]+'</div><div class="v" id="a'+i+'">90°</div></div><input type="range" id="s'+i+'" min="0" max="180" value="90"></div>';}
+for(let i=0;i<6;i++){html+='<div class="c"><div class="h"><div class="n">'+NAMES[i]+'</div><div class="v" id="a'+i+'">90°</div></div><input type="range" id="s'+i+'" min="0" max="180" value="90"></div>';}
 document.getElementById('cards').innerHTML=html;
-for(let i=0;i<5;i++){let s=document.getElementById('s'+i);
+for(let i=0;i<6;i++){let s=document.getElementById('s'+i);
 s.addEventListener('input',()=>{document.getElementById('a'+i).textContent=s.value+'°';});
 s.addEventListener('change',()=>{fetch('/set?servo='+i+'&angle='+s.value);});}
 </script></body></html>

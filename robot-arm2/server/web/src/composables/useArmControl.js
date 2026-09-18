@@ -1,14 +1,15 @@
 import { ref, reactive, readonly } from 'vue'
 
-// 舵机名称，顺序与后端一致（0=底座 … 4=夹爪）
-export const SERVO_NAMES = ['底座', '大臂', '小臂', '手腕', '夹爪']
+// 舵机名称，顺序与固件一致（对应 SO-ARM101 的 6 个关节，自下而上）
+export const SERVO_NAMES = ['底座', '肩部', '肘部', '腕俯仰', '腕旋转', '夹爪']
 
 // 预设姿态
+// ⚠️ 这些是示意值，装好机械臂后需要按实际机械限位标定
 export const PRESETS = [
-  { key: 'home', label: '复位', angles: [90, 90, 90, 90, 90] },
-  { key: 'ready', label: '预备', angles: [90, 120, 60, 90, 150] },
-  { key: 'grab', label: '抓取', angles: [90, 135, 45, 90, 150] },
-  { key: 'drop', label: '放下', angles: [90, 60, 120, 90, 150] },
+  { key: 'home', label: '复位', angles: [90, 90, 90, 90, 90, 90] },
+  { key: 'ready', label: '预备', angles: [90, 120, 60, 90, 90, 150] },
+  { key: 'grab', label: '抓取', angles: [90, 135, 45, 90, 90, 150] },
+  { key: 'drop', label: '放下', angles: [90, 60, 120, 90, 90, 150] },
 ]
 
 const ANGLE_MIN = 0

@@ -13,8 +13,8 @@ import requests
 # 服务端默认地址与端口（见 server/config.js 的 PORT）
 DEFAULT_BASE_URL = "http://localhost:3000"
 
-# 舵机编号 -> 名称，和网页遥控页保持一致
-SERVO_NAMES = ("底座", "大臂", "小臂", "手腕", "夹爪")
+# 舵机编号 -> 名称，和网页遥控页保持一致（SO-ARM101 的 6 个关节）
+SERVO_NAMES = ("底座", "肩部", "肘部", "腕俯仰", "腕旋转", "夹爪")
 NUM_SERVOS = len(SERVO_NAMES)
 
 ANGLE_MIN, ANGLE_MAX = 0, 180

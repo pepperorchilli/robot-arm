@@ -40,13 +40,16 @@ STABLE_FRAMES = 5
 
 # 指令模式：手势 → (说明, 动作)
 #   动作接收一个 ArmClient，想发什么就发什么
+#   索引对应 SO-ARM101 的 6 个关节：0底座 1肩 2肘 3腕俯仰 4腕旋转 5夹爪
+GRIPPER = 5   # 夹爪的舵机编号
+
 GESTURE_ACTIONS = {
-    "张开":   ("夹爪张开", lambda c: c.set_servo(4, 150)),
-    "握拳":   ("夹爪闭合", lambda c: c.set_servo(4, 30)),
+    "张开":   ("夹爪张开", lambda c: c.set_servo(GRIPPER, 150)),
+    "握拳":   ("夹爪闭合", lambda c: c.set_servo(GRIPPER, 30)),
     "数字1":  ("全部回中", lambda c: c.reset(90)),
-    "剪刀手": ("预备姿态", lambda c: c.set_all([90, 120, 60, 90, 150])),
-    "数字3":  ("抓取姿态", lambda c: c.set_all([90, 135, 45, 90, 150])),
-    "数字4":  ("放下姿态", lambda c: c.set_all([90, 60, 120, 90, 150])),
+    "剪刀手": ("预备姿态", lambda c: c.set_all([90, 120, 60, 90, 90, 150])),
+    "数字3":  ("抓取姿态", lambda c: c.set_all([90, 135, 45, 90, 90, 150])),
+    "数字4":  ("放下姿态", lambda c: c.set_all([90, 60, 120, 90, 90, 150])),
     "小指":   ("全部复位", lambda c: c.reset(90)),
 }
 
@@ -106,7 +109,7 @@ class CommandMode:
 
 
 class FollowMode:
-    """跟随模式：手掌位置 → 底座/大臂角度"""
+    """跟随模式：手掌位置 → 底座/肩部角度"""
 
     name = "跟随模式"
 
@@ -122,14 +125,14 @@ class FollowMode:
         # 画面坐标：x 向右 0→1，y 向下 0→1
         # 底座左右旋转：手往右 → 底座往右转
         base = int(round((1 - cx) * 180))
-        # 大臂俯仰：手往上 → 大臂抬起（画面 y 越小越高）
+        # 肩部俯仰：手往上 → 肩部抬起（画面 y 越小越高）
         arm = int(round(cy * 180))
         base = max(0, min(180, base))
         arm = max(0, min(180, arm))
 
         # 变化太小就不发，省得刷屏（服务端每次都转发给 ESP32）
         if self.last_sent and abs(base - self.last_sent[0]) < 2 and abs(arm - self.last_sent[1]) < 2:
-            return f"底座{base}° 大臂{arm}°（保持）", False
+            return f"底座{base}° 肩部{arm}°（保持）", False
 
         self.client.set_servo(0, base)
         self.client.set_servo(1, arm)
