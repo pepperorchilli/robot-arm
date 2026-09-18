@@ -1,0 +1,74 @@
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#000;
+  --card:rgba(255,255,255,0.06);
+  --accent:#00e5ff;
+  --danger:#ff6b6b;
+  --text:#fff;
+  --muted:rgba(255,255,255,0.5);
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
+.container{max-width:520px;margin:0 auto;padding:16px}
+
+/* 顶部导航 */
+.nav{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;background:rgba(0,0,0,0.25);position:sticky;top:0;z-index:10}
+.nav .brand{font-weight:700;color:var(--text);text-decoration:none;font-size:16px;white-space:nowrap}
+.nav .links{display:flex;gap:2px}
+.nav .links a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 9px;border-radius:8px}
+.nav .links a.on{color:var(--accent);background:rgba(0,229,255,0.12)}
+
+h1{font-size:20px;text-align:center;margin:8px 0 2px}
+.subtitle{text-align:center;font-size:13px;color:var(--muted);margin-bottom:16px}
+
+/* 卡片 */
+.c{background:var(--card);border-radius:16px;padding:14px;margin-bottom:10px}
+.h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.n{font-size:14px;font-weight:600}
+.v{font-size:24px;font-weight:700;color:var(--accent)}
+
+/* 滑块 */
+input[type=range]{-webkit-appearance:none;width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,0.15);outline:none;margin-bottom:8px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff}
+
+/* 按钮 */
+button{cursor:pointer;border:none;border-radius:12px;font-family:inherit}
+.btn{width:100%;padding:12px;background:var(--accent);color:#000;font-size:15px;font-weight:700}
+.btn.danger{background:var(--danger);color:#fff}
+
+/* 快捷角度按钮 */
+.p{display:flex;gap:5px;margin-bottom:6px}
+.p button{flex:1;padding:6px 0;border-radius:8px;background:rgba(255,255,255,0.1);color:#fff;font-size:11px}
+.p button.on{background:var(--accent);color:#000}
+.f{display:flex;justify-content:center;gap:6px}
+.f button{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.1);color:#fff;font-size:14px}
+
+/* 表单 */
+input[type=text],textarea{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-family:inherit;margin-bottom:8px;outline:none}
+input[type=text]:focus,textarea:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:80px}
+
+/* 留言 */
+.msg .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.msg .who{font-weight:600;font-size:14px}
+.msg .when{font-size:11px;color:var(--muted)}
+.body{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.reply-list{margin-top:10px;padding-left:12px;border-left:2px solid rgba(0,229,255,0.3)}
+.reply{font-size:13px;margin-bottom:6px;color:rgba(255,255,255,0.85);line-height:1.5}
+.reply .rwho{color:var(--accent);font-weight:600}
+.msg .actions{margin-top:8px;display:flex;gap:6px}
+.msg .actions button{padding:5px 12px;font-size:12px;border-radius:8px;background:rgba(255,255,255,0.1);color:var(--muted)}
+.msg .actions button.del{background:rgba(255,107,107,0.18);color:var(--danger)}
+
+/* 下载 */
+.dl{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--text)}
+.dl .icon{font-size:28px}
+.dl .info{flex:1}
+.dl .name{font-size:15px;font-weight:600}
+.dl .desc{font-size:12px;color:var(--muted)}
+
+/* 步骤 */
+.step{display:flex;gap:10px;margin-bottom:10px}
+.step .num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}
+.step .txt{font-size:14px;line-height:1.6}
+
+.footer{text-align:center;font-size:12px;color:var(--muted);padding:24px 0 40px}

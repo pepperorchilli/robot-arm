@@ -1,0 +1,13 @@
+{
+  "name": "robot-arm-server",
+  "version": "1.0.0",
+  "description": "机械臂云控制服务器 + 产品网站（遥控 / 留言板 / 下载 / PWA）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

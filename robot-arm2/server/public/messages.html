@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>机械臂 · 留言板</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">机械臂</a>
+  <div class="links">
+    <a href="/">首页</a>
+    <a href="/control">遥控</a>
+    <a href="/messages" class="on">留言</a>
+    <a href="/download">下载</a>
+  </div>
+</nav>
+<div class="container">
+  <h1>给我留言</h1>
+  <p class="subtitle">你的想法我都会看到</p>
+
+  <div class="c">
+    <input type="text" id="nickname" placeholder="你的昵称" maxlength="20">
+    <textarea id="content" placeholder="想说什么？" maxlength="500"></textarea>
+    <button class="btn" onclick="postMsg()">发布留言</button>
+  </div>
+
+  <div id="list"></div>
+  <div class="footer">留言会保存到服务器</div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

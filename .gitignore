@@ -5,17 +5,18 @@
 node_modules/
 
 # 运行时数据（留言等）
-server/data/
+# 用 **/ 前缀匹配任意层级 —— 仓库里现在有 robot-arm 1/ 和 robot-arm2/ 两个子目录
+**/server/data/
 
 # 配置文件（含密码/密钥，不提交；用 config.example.js 作模板）
-server/config.js
+**/server/config.js
+
+# 前端构建产物（由 npm run build 生成，不入库）
+**/server/public/control/
+
+# 固件凭据（WiFi 密码 / 服务器地址 / token），用 .example 作模板
+secrets.h
 
 # 个人求职资料（仓库是公开的，不外传）
 能力目录.txt
 能力评估与补缺清单.md
-
-# 前端构建产物（由 npm run build 生成，不入库）
-server/public/control/
-
-# 固件凭据（WiFi 密码 / 服务器地址 / token），用 .example 作模板
-secrets.h

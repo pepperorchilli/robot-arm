@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>机械臂 · 下载</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">机械臂</a>
+  <div class="links">
+    <a href="/">首页</a>
+    <a href="/control">遥控</a>
+    <a href="/messages">留言</a>
+    <a href="/download" class="on">下载</a>
+  </div>
+</nav>
+<div class="container">
+  <h1>下载与安装</h1>
+  <p class="subtitle">像装 App 一样，把机械臂遥控器装进手机</p>
+
+  <div class="c">
+    <div class="n">安装「遥控 App」（网页应用 PWA）</div>
+    <div style="margin-top:12px">
+      <div class="step"><div class="num">1</div><div class="txt">用手机浏览器打开本站（Safari / Chrome；微信里请点右上角「在浏览器打开」）</div></div>
+      <div class="step"><div class="num">2</div><div class="txt">点浏览器菜单里的「添加到主屏幕」或「安装应用」</div></div>
+      <div class="step"><div class="num">3</div><div class="txt">桌面出现图标，点开就是遥控器——无需下载安装包，随时可用</div></div>
+    </div>
+  </div>
+
+  <div class="c">
+    <div class="n">3D 模型（STL，可 3D 打印）</div>
+    <a class="dl" style="margin-top:12px" href="/files/base.stl" download>
+      <div class="info"><div class="name">底座</div><div class="desc">base.stl</div></div>
+    </a>
+    <a class="dl" style="margin-top:10px" href="/files/lower_arm.stl" download>
+      <div class="info"><div class="name">下臂</div><div class="desc">lower_arm.stl</div></div>
+    </a>
+    <a class="dl" style="margin-top:10px" href="/files/elbow.stl" download>
+      <div class="info"><div class="name">肘部</div><div class="desc">elbow.stl</div></div>
+    </a>
+    <a class="dl" style="margin-top:10px" href="/files/wrist.stl" download>
+      <div class="info"><div class="name">手腕</div><div class="desc">wrist.stl</div></div>
+    </a>
+    <a class="dl" style="margin-top:10px" href="/files/left_gripper.stl" download>
+      <div class="info"><div class="name">左爪</div><div class="desc">left_gripper.stl</div></div>
+    </a>
+    <a class="dl" style="margin-top:10px" href="/files/right_gripper.stl" download>
+      <div class="info"><div class="name">右爪</div><div class="desc">right_gripper.stl</div></div>
+    </a>
+  </div>
+
+  <div class="footer">网站会持续更新</div>
+</div>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}
+</script>
+</body>
+</html>
