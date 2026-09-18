@@ -16,3 +16,6 @@ server/config.js
 
 # 前端构建产物（由 npm run build 生成，不入库）
 server/public/control/
+
+# 固件凭据（WiFi 密码 / 服务器地址 / token），用 .example 作模板
+secrets.h
