@@ -66,7 +66,8 @@ app.delete('/api/messages/:id', wrap(async (req, res) => {
 }));
 
 // ---------- 页面（无后缀 URL）----------
-app.get('/control', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control.html')));
+// /control 是 Vue 3 单页应用，构建产物在 public/control/，
+// 由上面的 express.static 直接处理（访问 /control 会自动跳到 /control/）
 app.get('/messages', (req, res) => res.sendFile(path.join(__dirname, 'public', 'messages.html')));
 app.get('/download', (req, res) => res.sendFile(path.join(__dirname, 'public', 'download.html')));
 

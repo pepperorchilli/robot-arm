@@ -1,0 +1,19 @@
+/* 全局样式：与站点其它页面保持一致的深色主题 */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #1a1a2e;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 深色背景下的默认按钮样式 */
+button {
+  font-family: inherit;
+}

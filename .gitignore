@@ -13,3 +13,6 @@ server/config.js
 # 个人求职资料（仓库是公开的，不外传）
 能力目录.txt
 能力评估与补缺清单.md
+
+# 前端构建产物（由 npm run build 生成，不入库）
+server/public/control/

@@ -5,6 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "setup": "npm install && cd web && npm install",
+    "build": "cd web && npm run build",
+    "dev:web": "cd web && npm run dev",
     "migrate": "node migrate.js",
     "explain": "node explain-demo.js",
     "init-db": "mysql -u root < schema.sql"
