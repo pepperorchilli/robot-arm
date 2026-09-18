@@ -161,19 +161,26 @@ def main():
     parser.add_argument("--camera", type=int, default=0, help="摄像头编号（默认 0）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只识别手势，不发控制命令")
+    parser.add_argument("--password", default=None,
+                        help="控制密码（也可用环境变量 ARM_PASSWORD）")
     parser.add_argument("--no-window", action="store_true",
                         help="不弹预览窗口（只打印识别结果）")
     args = parser.parse_args()
 
-    client = ArmClient(args.url)
+    client = ArmClient(args.url, password=args.password)
 
     if args.dry_run:
         print("[dry-run] 只识别，不发送控制命令")
     elif not client.ping():
         print(f"⚠️  连不上服务器 {args.url}：{client.last_error}")
         print("    机械臂不会动。可以先开服务器，或用 --dry-run 只调识别。")
+    elif not client.login():
+        # 服务器要求登录才能控制（防止陌生人乱动机械臂）
+        print(f"⚠️  登录失败：{client.last_error}")
+        print("    控制接口需要密码，用 --password 参数或环境变量 ARM_PASSWORD 提供。")
+        print("    例如： ARM_PASSWORD=你的密码 uv run gesture_control.py")
     else:
-        print(f"✅ 已连上服务器 {args.url}")
+        print(f"✅ 已连上服务器 {args.url} 并登录成功")
 
     hands = build_hands()
 

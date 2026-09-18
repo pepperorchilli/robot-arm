@@ -30,6 +30,21 @@ uv run gesture_control.py --camera 1             # 换摄像头
 uv run gesture_control.py --no-window            # 不弹预览窗
 ```
 
+### ⚠️ 控制需要密码
+
+服务器要求登录后才能控制机械臂（防止陌生人乱动）。密码用参数或环境变量提供：
+
+```bash
+# 方式一：环境变量（推荐，不留在命令历史里）
+ARM_PASSWORD=你的密码 uv run gesture_control.py
+
+# 方式二：命令行参数
+uv run gesture_control.py --password 你的密码
+```
+
+> 客户端会先用密码调 `/api/login` 换一个 token，之后所有 `/set` 请求自动带上。
+> token 过期时会自动重新登录，不用手动处理。
+
 ### 快捷键
 
 | 键 | 作用 |

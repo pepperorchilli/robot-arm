@@ -254,7 +254,11 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // ---- 连服务器（token 放在连接地址里，服务器会校验）----
-  String path = "/?token=" + String(ESP32_TOKEN);
+  // ⚠️ 路径必须是 /ws，不能是 /
+  //    因为前面挂了 Nginx：/ 要留给静态首页，WebSocket 走独立路径 /ws。
+  //    Nginx 无法按请求头区分 location，所以靠路径来分流。
+  //    （服务器只校验 token 不校验路径，所以改路径不需要改后端）
+  String path = "/ws?token=" + String(ESP32_TOKEN);
   ws.begin(SERVER_HOST, SERVER_PORT, path.c_str());
   ws.onEvent(onMessage);
   ws.setReconnectInterval(5000);

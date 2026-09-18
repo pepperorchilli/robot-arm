@@ -3,6 +3,7 @@
 //   - Express：静态网站（首页/遥控/留言/下载）+ 留言 API（数据存 MySQL）
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const WebSocket = require('ws');
 const config = require('./config');
@@ -12,6 +13,64 @@ const swaggerSpec = require('./swagger');
 const swaggerUi = require('swagger-ui-express');
 
 let esp32 = null; // 当前连进来的 ESP32（只存一台）
+
+// ==================== 遥控鉴权 ====================
+//
+// 机械臂控制页是公开的（谁都能看到），但**控制需要登录**——
+// 否则任何人都能把你的舵机玩坏。
+//
+// 方案：密码登录 → 签发随机 token → 存内存 + 写 httpOnly cookie。
+// 用内存存而不是签名的无状态 token，好处是重启即失效、且可以主动踢人；
+// 代价是服务重启后需要重新登录（对这个场景可以接受）。
+
+const sessions = new Map();                 // token -> 过期时间戳
+const SESSION_TTL = 7 * 24 * 3600 * 1000;   // 7 天
+const COOKIE_NAME = 'arm_token';
+
+function issueToken() {
+  const token = crypto.randomBytes(24).toString('hex');
+  sessions.set(token, Date.now() + SESSION_TTL);
+  return token;
+}
+
+function isValidToken(token) {
+  if (!token) return false;
+  const expireAt = sessions.get(token);
+  if (!expireAt) return false;
+  if (Date.now() > expireAt) {
+    sessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+// 定期清理过期 token，避免内存无限增长
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, expireAt] of sessions) {
+    if (now > expireAt) sessions.delete(token);
+  }
+}, 3600 * 1000);
+
+function parseCookie(req, name) {
+  const raw = req.headers.cookie;
+  if (!raw) return null;
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    if (part.slice(0, idx).trim() === name) {
+      return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+  }
+  return null;
+}
+
+/** 鉴权中间件：cookie 或 X-Auth-Token 头里有有效 token 才放行 */
+function requireAuth(req, res, next) {
+  const token = parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
+  if (isValidToken(token)) return next();
+  res.status(401).send('需要登录后才能控制机械臂');
+}
 
 const app = express();
 app.use(express.json()); // 解析 POST 的 JSON body
@@ -28,6 +87,78 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // 把 async 路由的错误统一接住，避免一个异常把整个进程带崩
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// ---------- 登录 ----------
+/**
+ * @openapi
+ * /api/login:
+ *   post:
+ *     tags: [遥控]
+ *     summary: 登录（控制机械臂需要）
+ *     description: |
+ *       机械臂控制页公开可见，但**控制需要登录**。
+ *       登录成功后服务器签发随机 token，写入 httpOnly cookie。
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 example: '你的管理员密码'
+ *     responses:
+ *       200:
+ *         description: 登录成功，已写入 cookie
+ *       401:
+ *         description: 密码错误
+ */
+app.post('/api/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password !== config.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: '密码错误' });
+  }
+  const token = issueToken();
+  // httpOnly：JS 读不到，防 XSS 窃取；sameSite=lax：防 CSRF
+  res.setHeader('Set-Cookie',
+    `${COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL / 1000}; HttpOnly; SameSite=Lax`);
+  console.log('✅ 有人登录了遥控台');
+  res.json({ ok: true });
+});
+
+/**
+ * @openapi
+ * /api/logout:
+ *   post:
+ *     tags: [遥控]
+ *     summary: 退出登录
+ *     responses:
+ *       200:
+ *         description: 已清除登录状态
+ */
+app.post('/api/logout', (req, res) => {
+  const token = parseCookie(req, COOKIE_NAME);
+  if (token) sessions.delete(token);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+  res.json({ ok: true });
+});
+
+/**
+ * @openapi
+ * /api/auth:
+ *   get:
+ *     tags: [遥控]
+ *     summary: 查询当前登录状态
+ *     responses:
+ *       200:
+ *         description: 返回 { authed: true/false }
+ */
+app.get('/api/auth', (req, res) => {
+  const token = parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
+  res.json({ authed: isValidToken(token) });
+});
 
 // ---------- 遥控命令：浏览器 -> ESP32 ----------
 /**
@@ -68,6 +199,13 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
  *             schema:
  *               type: string
  *               example: '90'
+ *       401:
+ *         description: 未登录（需先调用 /api/login）
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: 需要登录后才能控制机械臂
  *       503:
  *         description: ESP32 未连接
  *         content:
@@ -76,7 +214,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
  *               type: string
  *               example: ESP32未连接
  */
-app.get('/set', (req, res) => {
+app.get('/set', requireAuth, (req, res) => {
   const servo = req.query.servo;
   const angle = req.query.angle;
   const cmd = servo + ':' + angle;

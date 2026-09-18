@@ -1,4 +1,5 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import ServoCard from './components/ServoCard.vue'
 import { useArmControl, SERVO_NAMES, PRESETS } from './composables/useArmControl.js'
 
@@ -7,51 +8,107 @@ const {
   status,
   online,
   sending,
+  authed,
+  checkingAuth,
+  checkAuth,
+  login,
+  logout,
   setAngle,
   setAngleNow,
   resetAll,
   applyPreset,
 } = useArmControl()
+
+const password = ref('')
+const loginError = ref('')
+const loggingIn = ref(false)
+
+onMounted(checkAuth)
+
+async function doLogin() {
+  if (!password.value) {
+    loginError.value = '请输入密码'
+    return
+  }
+  loggingIn.value = true
+  loginError.value = ''
+  try {
+    await login(password.value)
+    password.value = ''
+  } catch (e) {
+    loginError.value = e.message
+  } finally {
+    loggingIn.value = false
+  }
+}
 </script>
 
 <template>
   <nav class="nav">
-    <a href="/" class="brand">机械臂</a>
+    <a href="/" class="brand">个人网站</a>
     <div class="links">
       <a href="/">首页</a>
-      <a href="/control" class="on">遥控</a>
-      <a href="/messages">留言</a>
-      <a href="/download">下载</a>
+      <a href="/control" class="on">机械臂</a>
+      <a href="/library/">图书管理</a>
+      <a href="/messages">留言板</a>
     </div>
   </nav>
 
   <div class="container">
     <h1>机械臂遥控</h1>
-    <p class="subtitle" :class="{ warn: !online }">
-      <span class="dot" :class="online ? 'ok' : 'bad'"></span>
-      {{ status }}
-    </p>
 
-    <div class="presets">
-      <button v-for="p in PRESETS" :key="p.key"
-              :disabled="sending"
-              @click="applyPreset(p)">{{ p.label }}</button>
+    <!-- ============ 正在检查登录状态 ============ -->
+    <p v-if="checkingAuth" class="subtitle">正在检查登录状态…</p>
+
+    <!-- ============ 未登录：显示登录框 ============ -->
+    <div v-else-if="!authed" class="login-box">
+      <div class="lock-icon">🔒</div>
+      <h2>需要登录才能控制</h2>
+      <p class="login-hint">
+        机械臂对所有人可见，但控制需要密码 —— 避免被陌生人误操作。
+      </p>
+      <input
+        type="password"
+        v-model="password"
+        placeholder="请输入控制密码"
+        @keyup.enter="doLogin"
+        :disabled="loggingIn"
+      />
+      <p v-if="loginError" class="login-error">{{ loginError }}</p>
+      <button class="login-btn" @click="doLogin" :disabled="loggingIn">
+        {{ loggingIn ? '登录中…' : '登录' }}
+      </button>
     </div>
 
-    <ServoCard
-      v-for="(name, i) in SERVO_NAMES"
-      :key="i"
-      :index="i"
-      :name="name"
-      :model-value="angles[i]"
-      :disabled="sending"
-      @update:model-value="(v) => setAngle(i, v)"
-      @jump="(v) => setAngleNow(i, v)"
-    />
+    <!-- ============ 已登录：显示控制台 ============ -->
+    <template v-else>
+      <p class="subtitle" :class="{ warn: !online }">
+        <span class="dot" :class="online ? 'ok' : 'bad'"></span>
+        {{ status }}
+        <button class="logout" @click="logout">退出登录</button>
+      </p>
 
-    <button class="reset" :disabled="sending" @click="resetAll(90)">全部回中</button>
+      <div class="presets">
+        <button v-for="p in PRESETS" :key="p.key"
+                :disabled="sending"
+                @click="applyPreset(p)">{{ p.label }}</button>
+      </div>
 
-    <div class="footer">Vue 3 + Vite · WebSocket 中转</div>
+      <ServoCard
+        v-for="(name, i) in SERVO_NAMES"
+        :key="i"
+        :index="i"
+        :name="name"
+        :model-value="angles[i]"
+        :disabled="sending"
+        @update:model-value="(v) => setAngle(i, v)"
+        @jump="(v) => setAngleNow(i, v)"
+      />
+
+      <button class="reset" :disabled="sending" @click="resetAll(90)">全部回中</button>
+
+      <div class="footer">Vue 3 + Vite · WebSocket 中转</div>
+    </template>
   </div>
 </template>
 
@@ -126,6 +183,100 @@ h1 {
   box-shadow: 0 0 6px #ff6b6b;
 }
 
+.logout {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: #8a8aa0;
+  cursor: pointer;
+}
+
+.logout:hover {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+/* ---------- 登录框 ---------- */
+.login-box {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 32px 24px;
+  text-align: center;
+  margin-top: 32px;
+}
+
+.lock-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.login-box h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.login-hint {
+  font-size: 13px;
+  color: #8a8aa0;
+  margin-bottom: 22px;
+  line-height: 1.6;
+}
+
+.login-box input {
+  width: 100%;
+  max-width: 280px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  text-align: center;
+}
+
+.login-box input:focus {
+  border-color: rgba(0, 229, 255, 0.5);
+}
+
+.login-error {
+  color: #ff6b6b;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.login-btn {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  margin: 16px auto 0;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: #00e5ff;
+  color: #1a1a2e;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.login-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- 控制台 ---------- */
 .presets {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

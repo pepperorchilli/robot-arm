@@ -36,6 +36,42 @@ export function useArmControl(options = {}) {
   const online = ref(true)   // 服务器/设备是否可用
   const sending = ref(false)
 
+  // 登录状态：控制页公开可见，但控制需要登录
+  const authed = ref(false)
+  const checkingAuth = ref(true)
+
+  async function checkAuth() {
+    checkingAuth.value = true
+    try {
+      const res = await fetch('/api/auth')
+      authed.value = (await res.json()).authed === true
+    } catch {
+      authed.value = false
+    } finally {
+      checkingAuth.value = false
+    }
+  }
+
+  async function login(password) {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || '登录失败')
+    }
+    authed.value = true
+    status.value = '已登录，可以开始控制'
+  }
+
+  async function logout() {
+    try { await fetch('/api/logout', { method: 'POST' }) } catch { /* 忽略 */ }
+    authed.value = false
+    status.value = '已退出登录'
+  }
+
   // 每个舵机的节流计时器：拖滑块会高频触发，
   // 不节流的话每个像素都发一次请求，把 ESP32 打爆
   const timers = new Array(SERVO_NAMES.length).fill(null)
@@ -45,6 +81,14 @@ export function useArmControl(options = {}) {
     sending.value = true
     try {
       const res = await fetch(`/set?servo=${index}&angle=${angle}`)
+
+      // 401：登录过期或未登录 → 退回登录界面
+      if (res.status === 401) {
+        authed.value = false
+        status.value = '登录已过期，请重新登录'
+        return false
+      }
+
       if (!res.ok) {
         const text = await res.text()
         online.value = false
@@ -121,6 +165,11 @@ export function useArmControl(options = {}) {
     status,
     online: readonly(online),
     sending: readonly(sending),
+    authed: readonly(authed),
+    checkingAuth: readonly(checkingAuth),
+    checkAuth,
+    login,
+    logout,
     setAngle,
     setAngleNow,
     resetAll,
