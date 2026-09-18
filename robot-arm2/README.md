@@ -87,14 +87,14 @@ uv run gesture_control.py   # 启动
 | [`server/`](server/) | 云控服务器 + 产品官网（Node + MySQL + Vue） | [README](server/README.md) · [数据库设计](server/DATABASE.md) |
 | [`server/web/`](server/web/) | Vue 3 遥控台前端 | [README](server/web/README.md) |
 | [`gesture-control/`](gesture-control/) | 手势识别控制（Python + MediaPipe） | [README](gesture-control/README.md) |
-| [`arm-cloud/`](arm-cloud/) | **云连接固件**（云端 + PCA9685，当前可用） | [README](arm-cloud/README.md) |
-| [`arm-cloud-bus/`](arm-cloud-bus/) | **云连接 + 总线舵机**（升级后使用） | — |
+| [`arm-cloud-bus/`](arm-cloud-bus/) | **云连接 + 总线舵机**（当前主线） | — |
 | [`arm-bus-servo/`](arm-bus-servo/) | 总线舵机固件（含串口调试命令） | [README](arm-bus-servo/README.md) |
-| [`wifi-off-hold-test/`](wifi-off-hold-test/) | 抖动问题诊断实验 | [诊断结论](wifi-off-hold-test/抖动诊断结论.md) |
 
-> 第一代的台架固件（`servo-test/`、`arm-5servo/`、`servo-direct-test/`）与
-> 原 3D 模型（`3D建模/`）已归档到 [`../robot-arm 1/`](../robot-arm%201/)。
-> 它们在第二代中已被 `arm-cloud*` 系列取代，仅作演进参考。
+> **所有 MG996R 时代的固件与模型已归档到 [`../robot-arm 1/`](../robot-arm%201/)**
+> —— `arm-cloud/`（云连接 + PCA9685）、`servo-test/`、`arm-5servo/`、
+> `servo-direct-test/`、`wifi-off-hold-test/` 与原 `3D建模/`。
+> 本目录只保留总线舵机方案，因为**换舵机只需要换固件**——
+> 下面的 `server/` 和 `gesture-control/` 与舵机型号无关，一行都没改。
 
 ---
 
@@ -132,7 +132,7 @@ uv run gesture_control.py   # 启动
 
 **解决**：这是架构性矛盾，加电容电阻只是在信号完整性层面打消耗战。改用**串行总线舵机**——走数字协议且带校验和，噪声要么被电平阈值滤掉、要么校验失败被丢弃，属于**协议层免疫**。同时获得了力反馈能力。
 
-> 完整报告：[抖动诊断结论.md](wifi-off-hold-test/抖动诊断结论.md)
+> 完整报告：[抖动诊断结论.md](../robot-arm%201/wifi-off-hold-test/抖动诊断结论.md)（在第一代归档目录中）
 
 ### 📊 有实证的数据库优化
 

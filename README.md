@@ -56,14 +56,13 @@ robot-arm2/
 ├── 技术文档.md           系统原理（含完整数据流追踪）
 ├── server/              云控服务器 + 官网（Node + MySQL + Vue 3）
 ├── gesture-control/     手势识别控制（Python + MediaPipe）
-├── arm-cloud/           云连接固件（云端 + PCA9685）
-├── arm-cloud-bus/       云连接 + 总线舵机（合并版）
-├── arm-bus-servo/       总线舵机固件（含串口调试命令）
-└── wifi-off-hold-test/  抖动问题诊断实验
+├── arm-cloud-bus/       云连接 + 总线舵机（当前主线）
+└── arm-bus-servo/       总线舵机固件（含串口调试命令）
 ```
 
-> 第一代的台架固件（`servo-test/`、`arm-5servo/`、`servo-direct-test/`）
-> 与原 3D 模型已归档到 `robot-arm 1/`，不在本目录中重复。
+> 所有 MG996R 时代的固件（`arm-cloud/`、`servo-test/`、`arm-5servo/`、
+> `servo-direct-test/`、`wifi-off-hold-test/`）与原 3D 模型
+> 已归档到 `robot-arm 1/`，不在本目录中重复。
 
 **这一代新增**：
 
@@ -85,7 +84,7 @@ robot-arm2/
 | 项目能做什么、怎么跑 | [robot-arm2/README.md](robot-arm2/README.md) |
 | 系统是怎么运作的 | [robot-arm2/技术文档.md](robot-arm2/技术文档.md) |
 | 每版固件为什么这么设计 | [固件演进记录.md](固件演进记录.md) |
-| 抖动问题怎么排查的 | [robot-arm2/wifi-off-hold-test/抖动诊断结论.md](robot-arm2/wifi-off-hold-test/抖动诊断结论.md) |
+| 抖动问题怎么排查的 | [抖动诊断结论.md](robot-arm%201/wifi-off-hold-test/抖动诊断结论.md) |
 | 数据库怎么设计的 | [robot-arm2/server/DATABASE.md](robot-arm2/server/DATABASE.md) |
 | 第一代长什么样 | [robot-arm 1/](robot-arm%201/) |
 
