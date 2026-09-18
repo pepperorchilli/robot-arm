@@ -82,11 +82,11 @@ robot-arm2/
 | 我想看… | 去哪里 |
 |---|---|
 | 项目能做什么、怎么跑 | [robot-arm2/README.md](robot-arm2/README.md) |
-| 系统是怎么运作的 | [robot-arm2/技术文档.md](robot-arm2/技术文档.md) |
+| **第二代**系统是怎么运作的 | [robot-arm2/技术文档.md](robot-arm2/技术文档.md) |
+| **第一代**系统 + **完整的抖动排查过程** | [robot-arm 1/技术文档.md](robot-arm%201/技术文档.md) |
 | 每版固件为什么这么设计 | [固件演进记录.md](固件演进记录.md) |
-| 抖动问题怎么排查的 | [抖动诊断结论.md](robot-arm%201/wifi-off-hold-test/抖动诊断结论.md) |
+| 抖动问题的诊断报告 | [抖动诊断结论.md](robot-arm%201/wifi-off-hold-test/抖动诊断结论.md) |
 | 数据库怎么设计的 | [robot-arm2/server/DATABASE.md](robot-arm2/server/DATABASE.md) |
-| 第一代长什么样 | [robot-arm 1/](robot-arm%201/) |
 
 ---
 
