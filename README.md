@@ -33,9 +33,11 @@ robot-arm2/      当前版本（第二代）
 
 ```
 robot-arm 1/
-├── 3D建模/              六个结构件的 STL
+├── 3D建模/              六个结构件的 STL（MG996R 尺寸，正在重新建模）
 ├── server/              云控服务器 + 官网（Node.js，JSON 存储）
-└── servo-test/          基础固件（softAP 自建热点 + PCA9685）
+├── servo-test/          基础固件（softAP 自建热点 + PCA9685）
+├── arm-5servo/          直驱固件（绕开 PCA9685 的实验）
+└── servo-direct-test/   单舵机诊断固件
 ```
 
 **这一代解决了什么**：让 ESP32 主动连出到云服务器，实现公网远程控制。
@@ -52,18 +54,16 @@ robot-arm 1/
 robot-arm2/
 ├── README.md            项目主页（功能介绍 / 架构 / 快速开始）
 ├── 技术文档.md           系统原理（含完整数据流追踪）
-├── 固件演进记录.md        每一版固件为什么这么做
-├── 3D建模/              六个结构件的 STL
 ├── server/              云控服务器 + 官网（Node + MySQL + Vue 3）
 ├── gesture-control/     手势识别控制（Python + MediaPipe）
-├── arm-cloud/           云连接固件（PCA9685）
+├── arm-cloud/           云连接固件（云端 + PCA9685）
 ├── arm-cloud-bus/       云连接 + 总线舵机（合并版）
 ├── arm-bus-servo/       总线舵机固件（含串口调试命令）
-├── servo-test/          台架固件（softAP + 自带网页）
-├── arm-5servo/          直驱固件
-├── servo-direct-test/   单舵机诊断
 └── wifi-off-hold-test/  抖动问题诊断实验
 ```
+
+> 第一代的台架固件（`servo-test/`、`arm-5servo/`、`servo-direct-test/`）
+> 与原 3D 模型已归档到 `robot-arm 1/`，不在本目录中重复。
 
 **这一代新增**：
 
@@ -84,7 +84,7 @@ robot-arm2/
 |---|---|
 | 项目能做什么、怎么跑 | [robot-arm2/README.md](robot-arm2/README.md) |
 | 系统是怎么运作的 | [robot-arm2/技术文档.md](robot-arm2/技术文档.md) |
-| 每版固件为什么这么设计 | [robot-arm2/固件演进记录.md](robot-arm2/固件演进记录.md) |
+| 每版固件为什么这么设计 | [固件演进记录.md](固件演进记录.md) |
 | 抖动问题怎么排查的 | [robot-arm2/wifi-off-hold-test/抖动诊断结论.md](robot-arm2/wifi-off-hold-test/抖动诊断结论.md) |
 | 数据库怎么设计的 | [robot-arm2/server/DATABASE.md](robot-arm2/server/DATABASE.md) |
 | 第一代长什么样 | [robot-arm 1/](robot-arm%201/) |

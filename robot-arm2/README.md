@@ -90,10 +90,11 @@ uv run gesture_control.py   # 启动
 | [`arm-cloud/`](arm-cloud/) | **云连接固件**（云端 + PCA9685，当前可用） | [README](arm-cloud/README.md) |
 | [`arm-cloud-bus/`](arm-cloud-bus/) | **云连接 + 总线舵机**（升级后使用） | — |
 | [`arm-bus-servo/`](arm-bus-servo/) | 总线舵机固件（含串口调试命令） | [README](arm-bus-servo/README.md) |
-| [`servo-test/`](servo-test/) | 台架固件（softAP + 自带网页） | — |
-| [`arm-5servo/`](arm-5servo/) | 直驱固件（绕开 PCA9685） | — |
 | [`wifi-off-hold-test/`](wifi-off-hold-test/) | 抖动问题诊断实验 | [诊断结论](wifi-off-hold-test/抖动诊断结论.md) |
-| [`3D建模/`](3D建模/) | 六个结构件的 STL 模型 | — |
+
+> 第一代的台架固件（`servo-test/`、`arm-5servo/`、`servo-direct-test/`）与
+> 原 3D 模型（`3D建模/`）已归档到 [`../robot-arm 1/`](../robot-arm%201/)。
+> 它们在第二代中已被 `arm-cloud*` 系列取代，仅作演进参考。
 
 ---
 
@@ -166,7 +167,7 @@ N+1 消除：列表接口从 1+N 次查询 → 固定 2 次
 
 ## 开发路线
 
-> 每一版固件为什么这么做、被什么取代，见 **[固件演进记录.md](固件演进记录.md)**
+> 每一版固件为什么这么做、被什么取代，见 **[固件演进记录.md](../固件演进记录.md)**
 
 - [x] 基础网页遥控（softAP）
 - [x] 云端化（WebSocket 主动连出，公网可控）
