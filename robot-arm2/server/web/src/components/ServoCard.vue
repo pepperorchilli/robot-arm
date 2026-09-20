@@ -61,16 +61,16 @@ function jump(angle) {
 <style scoped>
 .card {
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 7px;
 }
 
 .head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 
 .name {
@@ -79,7 +79,7 @@ function jump(angle) {
 }
 
 .value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: #ffffff;
   font-variant-numeric: tabular-nums;  /* 数字等宽，变化时不跳动 */
@@ -93,7 +93,7 @@ function jump(angle) {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.15);
   outline: none;
-  margin-bottom: 10px;
+  margin-bottom: 7px;
 }
 
 .slider::-webkit-slider-thumb {
@@ -118,16 +118,16 @@ function jump(angle) {
 
 .row.fine {
   grid-template-columns: repeat(4, 1fr);
-  margin-top: 6px;
+  margin-top: 5px;
 }
 
 button {
-  padding: 8px 0;
+  padding: 6px 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.05);
   color: #c8c8c8;
-  font-size: 12px;
+  font-size: 11.5px;
   cursor: pointer;
   transition: all 0.15s;
 }

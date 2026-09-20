@@ -6,14 +6,19 @@
 <title>机械臂 · 旧版控制台</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  /* 版本切换 */
-  .verbar {
-    display: flex; gap: 8px; margin-bottom: 16px;
+  /* 顶栏：版本切换在左，账号在右，一行放完 */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 10px;
   }
+
+  /* 版本切换（做小一点，别抢控制面板的位置） */
+  .verbar { display: flex; gap: 6px; }
   .verbar a {
-    flex: 1; text-align: center; padding: 10px;
-    border-radius: 10px; font-size: 13px; font-weight: 600;
-    text-decoration: none; transition: all .15s;
+    padding: 7px 14px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600;
+    text-decoration: none; white-space: nowrap;
+    transition: all .15s;
     border: 1px solid rgba(255,255,255,.12);
     background: rgba(255,255,255,.04);
     color: #8a8a8a;
@@ -25,7 +30,18 @@
     border-color: rgba(255,255,255,.4);
   }
 
-  /* 说明条：这一代和现在那代的差别 */
+  /* 状态行 */
+  .statusline {
+    display: flex; align-items: center;
+    font-size: 12.5px; color: #8a8a8a;
+    margin-bottom: 10px; min-height: 18px;
+  }
+
+  /* 控制面板压缩一点，一屏能多看几个轴 */
+  .c { padding: 10px 12px; margin-bottom: 7px; }
+  .c .v { font-size: 18px; }
+
+  /* 说明条放最下面 */
   .vintage-note {
     background: rgba(255,255,255,.05);
     border-left: 2px solid rgba(255,255,255,.3);
@@ -34,7 +50,7 @@
     font-size: 12.5px;
     color: #8a8a8a;
     line-height: 1.8;
-    margin-bottom: 16px;
+    margin-top: 20px;
   }
   .vintage-note b { color: #ccc; font-weight: 600; }
 </style>
@@ -51,33 +67,31 @@
 </nav>
 
 <div class="container">
-  <!-- 版本切换：两代控制台 -->
-  <div class="verbar">
-    <a href="/control/v2">新版 · 6 轴总线舵机</a>
-    <a href="/control/v1" class="on">旧版 · 5 轴模拟舵机</a>
-  </div>
-
-  <div class="titlebar">
-    <div>
-      <h1>机械臂遥控 <span style="font-size:14px;color:#8a8a8a;font-weight:400">旧版</span></h1>
-      <p class="subtitle" id="status">
-        <span class="dot" id="dot"></span>
-        <span id="statustext">检查中…</span>
-      </p>
+  <!-- 顶栏：版本切换在左，账号在右，一行放完 -->
+  <div class="topbar">
+    <div class="verbar">
+      <a href="/control/v2">新版 6 轴</a>
+      <a href="/control/v1" class="on">旧版 5 轴</a>
     </div>
     <div id="userbar"></div>
   </div>
 
-  <div class="vintage-note">
-    <b>第一代控制台</b> —— 这是项目最初的样子：
-    MG996R 模拟舵机 + PCA9685 驱动板，5 个自由度，
-    原生 JavaScript 手写界面。<br>
-    和第二代（总线舵机、6 轴、Vue 3）相比，界面更朴素，但功能可用。
-  </div>
+  <!-- 状态行：在线状态 + 上一条指令，压成一行 -->
+  <p class="statusline">
+    <span class="dot" id="dot"></span>
+    <span id="statustext">检查中…</span>
+  </p>
 
+  <!-- 控制面板紧跟在下面，不用滚动就能看到 -->
   <div id="cards"></div>
   <button class="btn" onclick="reset()">一键复位</button>
-  <div class="footer">第一代 · PCA9685 + 模拟舵机</div>
+
+  <!-- 说明放最下面，不占前面空间 -->
+  <div class="vintage-note">
+    <b>第一代控制台</b> —— 项目最初的样子：MG996R 模拟舵机 + PCA9685 驱动板，
+    5 个自由度，原生 JavaScript 手写界面。<br>
+    和第二代（总线舵机、6 轴、Vue 3）相比，界面更朴素，但功能可用。
+  </div>
 </div>
 
 <script src="/auth.js"></script>

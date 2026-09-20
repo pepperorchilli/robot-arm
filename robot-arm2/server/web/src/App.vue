@@ -53,14 +53,12 @@ onMounted(async () => {
   </nav>
 
   <div class="container">
-    <!-- 两代控制台切换 -->
-    <div class="verbar">
-      <a href="/control" class="on">新版 · 6 轴总线舵机</a>
-      <a href="/control/v1">旧版 · 5 轴模拟舵机</a>
-    </div>
-
-    <div class="titlebar">
-      <h1>机械臂遥控</h1>
+    <!-- 顶栏：版本切换 + 账号，一行放完，不占竖向空间 -->
+    <div class="topbar">
+      <div class="verbar">
+        <a href="/control" class="on">新版 6 轴</a>
+        <a href="/control/v1">旧版 5 轴</a>
+      </div>
       <div v-if="account" class="userbar">
         <span class="uname">{{ account.nickname }}</span>
         <span v-if="account.role === 'admin'" class="badge">管理员</span>
@@ -71,19 +69,15 @@ onMounted(async () => {
     <p v-if="checkingAuth" class="subtitle">正在检查登录状态…</p>
 
     <template v-else-if="authed">
-      <!-- 设备在线状态灯：决定指令发不发得出去 -->
-      <p class="subtitle" :class="{ warn: !deviceOnline }">
+      <!-- 状态行：设备在线与否 + 上一条指令结果，合成一行 -->
+      <p class="statusline" :class="{ offline: !deviceOnline }">
         <span class="dot" :class="deviceOnline ? 'ok' : 'bad'"></span>
         <template v-if="deviceOnline">
-          机械臂在线<span v-if="deviceUptime">（已连接 {{ deviceUptime }}）</span>
+          在线<span v-if="deviceUptime"> {{ deviceUptime }}</span>
         </template>
-        <template v-else>
-          机械臂离线 —— 指令发不出去，请检查 ESP32 是否上电联网
-        </template>
-      </p>
-
-      <p class="subtitle">
-        {{ status }}
+        <template v-else>离线</template>
+        <span class="sep">·</span>
+        <span class="stat">{{ status }}</span>
       </p>
 
       <div class="presets">
@@ -117,7 +111,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px;
+  padding: 10px 16px;
   max-width: 720px;
   margin: 0 auto;
 }
@@ -148,21 +142,28 @@ onMounted(async () => {
   padding: 0 16px 40px;
 }
 
-/* 两代控制台切换 */
+/* 顶栏：版本切换在左，账号在右，一行放完 —— 不留大标题占竖向空间 */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* 两代控制台切换（做小一点，别抢控制面板的位置） */
 .verbar {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
 }
 
 .verbar a {
-  flex: 1;
-  text-align: center;
-  padding: 10px;
-  border-radius: 10px;
-  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
   transition: all 0.15s;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
@@ -180,16 +181,25 @@ onMounted(async () => {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
-.titlebar {
+/* 状态行：在线状态 + 上一条指令，压成一行 */
+.statusline {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: #8a8a8a;
+  margin-bottom: 10px;
+  min-height: 18px;
 }
 
-h1 {
-  font-size: 24px;
+.statusline .sep {
+  margin: 0 8px;
+  color: #444;
+}
+
+.statusline .stat {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .userbar {
@@ -262,17 +272,17 @@ h1 {
 .presets {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .presets button {
-  padding: 10px 0;
+  padding: 7px 0;
   border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
