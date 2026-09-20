@@ -11,34 +11,34 @@
   .tabs button {
     flex: 1; padding: 11px; border-radius: 10px; font-size: 14px; font-weight: 600;
     border: 1px solid rgba(255,255,255,.12);
-    background: rgba(255,255,255,.05); color: #8a8aa0;
+    background: rgba(255,255,255,.05); color: #8a8a8a;
     cursor: pointer; font-family: inherit; transition: all .15s;
   }
   .tabs button.on {
-    background: rgba(0,229,255,.15); color: #00e5ff;
-    border-color: rgba(0,229,255,.4);
+    background: rgba(255,255,255,.15); color: #ffffff;
+    border-color: rgba(255,255,255,.4);
   }
   .field { margin-bottom: 12px; }
-  .field label { display: block; font-size: 12px; color: #8a8aa0; margin-bottom: 6px; }
+  .field label { display: block; font-size: 12px; color: #8a8a8a; margin-bottom: 6px; }
   .field input {
     width: 100%; padding: 12px 14px; border-radius: 10px;
     border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.08);
     color: #fff; font-size: 14px; font-family: inherit; outline: none;
   }
-  .field input:focus { border-color: rgba(0,229,255,.5); }
-  .hint { font-size: 11.5px; color: #55556a; margin-top: 5px; }
+  .field input:focus { border-color: rgba(255,255,255,.5); }
+  .hint { font-size: 11.5px; color: #555555; margin-top: 5px; }
   .submit {
     width: 100%; padding: 13px; border: none; border-radius: 10px;
-    background: #00e5ff; color: #1a1a2e; font-size: 15px; font-weight: 700;
+    background: #ffffff; color: #000000; font-size: 15px; font-weight: 700;
     cursor: pointer; margin-top: 6px; font-family: inherit; transition: opacity .15s;
   }
   .submit:hover:not(:disabled) { opacity: .85; }
   .submit:disabled { opacity: .5; cursor: not-allowed; }
   .msg { font-size: 13px; margin-top: 12px; text-align: center; min-height: 18px; }
-  .msg.err { color: #ff6b6b; }
-  .msg.ok { color: #2ee59d; }
+  .msg.err { color: #bbbbbb; }
+  .msg.ok { color: #ffffff; }
   .note {
-    font-size: 12px; color: #55556a; text-align: center;
+    font-size: 12px; color: #555555; text-align: center;
     margin-top: 22px; line-height: 1.7;
   }
 </style>
@@ -163,5 +163,6 @@
   document.getElementById('li-password').addEventListener('keyup', e => { if (e.key === 'Enter') doLogin(); });
   document.getElementById('rg-password').addEventListener('keyup', e => { if (e.key === 'Enter') doRegister(); });
 </script>
+<script src="/starfield.js"></script>
 </body>
 </html>

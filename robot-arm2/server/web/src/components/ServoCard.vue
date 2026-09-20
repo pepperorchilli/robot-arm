@@ -81,7 +81,7 @@ function jump(angle) {
 .value {
   font-size: 22px;
   font-weight: 700;
-  color: #00e5ff;
+  color: #ffffff;
   font-variant-numeric: tabular-nums;  /* 数字等宽，变化时不跳动 */
 }
 
@@ -101,7 +101,7 @@ function jump(angle) {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #00e5ff;
+  background: #ffffff;
   border: 2px solid #fff;
   cursor: pointer;
 }
@@ -126,22 +126,22 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
-  color: #c8c8d8;
+  color: #c8c8c8;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 button:hover:not(:disabled) {
-  background: rgba(0, 229, 255, 0.15);
-  color: #00e5ff;
-  border-color: rgba(0, 229, 255, 0.4);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 button.on {
-  background: rgba(0, 229, 255, 0.2);
-  color: #00e5ff;
-  border-color: rgba(0, 229, 255, 0.5);
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
 button:disabled {

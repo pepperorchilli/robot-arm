@@ -1,10 +1,10 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#000;
-  --card:rgba(255,255,255,0.06);
-  --accent:#00e5ff;
-  --danger:#ff6b6b;
-  --text:#fff;
+  --bg:#000000;
+  --card:rgba(255,255,255,0.05);
+  --accent:#ffffff;
+  --danger:#bbbbbb;
+  --text:#ffffff;
   --muted:rgba(255,255,255,0.5);
 }
 body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
@@ -15,7 +15,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;backg
 .nav .brand{font-weight:700;color:var(--text);text-decoration:none;font-size:16px;white-space:nowrap}
 .nav .links{display:flex;gap:2px}
 .nav .links a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 9px;border-radius:8px}
-.nav .links a.on{color:var(--accent);background:rgba(0,229,255,0.12)}
+.nav .links a.on{color:var(--accent);background:rgba(255, 255, 255,0.12)}
 
 h1{font-size:20px;text-align:center;margin:8px 0 2px}
 .subtitle{text-align:center;font-size:13px;color:var(--muted);margin-bottom:16px}
@@ -52,12 +52,12 @@ textarea{resize:vertical;min-height:80px}
 .msg .who{font-weight:600;font-size:14px}
 .msg .when{font-size:11px;color:var(--muted)}
 .body{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
-.reply-list{margin-top:10px;padding-left:12px;border-left:2px solid rgba(0,229,255,0.3)}
+.reply-list{margin-top:10px;padding-left:12px;border-left:2px solid rgba(255, 255, 255,0.3)}
 .reply{font-size:13px;margin-bottom:6px;color:rgba(255,255,255,0.85);line-height:1.5}
 .reply .rwho{color:var(--accent);font-weight:600}
 .msg .actions{margin-top:8px;display:flex;gap:6px}
 .msg .actions button{padding:5px 12px;font-size:12px;border-radius:8px;background:rgba(255,255,255,0.1);color:var(--muted)}
-.msg .actions button.del{background:rgba(255,107,107,0.18);color:var(--danger)}
+.msg .actions button.del{background:rgba(187, 187, 187,0.18);color:var(--danger)}
 
 /* 下载 */
 .dl{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--text)}
@@ -89,9 +89,9 @@ textarea{resize:vertical;min-height:80px}
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(0, 229, 255, .15);
-  color: #00e5ff;
-  border: 1px solid rgba(0, 229, 255, .3);
+  background: rgba(255, 255, 255, .15);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, .3);
 }
 
 button.mini {
@@ -99,7 +99,7 @@ button.mini {
   border: 1px solid rgba(255, 255, 255, .15);
   border-radius: 8px;
   background: rgba(255, 255, 255, .06);
-  color: #c8c8d8;
+  color: #c8c8c8;
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
@@ -107,9 +107,9 @@ button.mini {
 }
 
 button.mini:hover {
-  background: rgba(0, 229, 255, .15);
-  color: #00e5ff;
-  border-color: rgba(0, 229, 255, .4);
+  background: rgba(255, 255, 255, .15);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, .4);
 }
 
 /* ---------- 登录状态栏（各页面复用）---------- */
@@ -122,22 +122,37 @@ button.mini:hover {
 
 .userbar-name {
   font-size: 13px;
-  color: #c8c8d8;
+  color: #c8c8c8;
 }
 
 a.userbar-login {
   display: inline-block;
   padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 229, 255, .3);
-  background: rgba(0, 229, 255, .1);
-  color: #00e5ff;
+  border: 1px solid rgba(255, 255, 255, .3);
+  background: rgba(255, 255, 255, .1);
+  color: #ffffff;
   font-size: 12.5px;
   text-decoration: none;
   transition: all .15s;
 }
 
 a.userbar-login:hover {
-  background: rgba(0, 229, 255, .2);
-  border-color: rgba(0, 229, 255, .5);
+  background: rgba(255, 255, 255, .2);
+  border-color: rgba(255, 255, 255, .5);
+}
+
+/* ---------- 星空背景（全站统一）---------- */
+#sky {
+  position: fixed;
+  inset: 0;
+  display: block;
+  z-index: 0;
+  pointer-events: none;      /* 星星不挡点击 */
+}
+
+/* 内容层压到星空之上 */
+.nav, .container, .titlebar, #toast {
+  position: relative;
+  z-index: 1;
 }

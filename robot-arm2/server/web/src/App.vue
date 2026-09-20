@@ -100,7 +100,7 @@ onMounted(async () => {
 }
 
 .links a {
-  color: #8a8aa0;
+  color: #8a8a8a;
   text-decoration: none;
   font-size: 14px;
   margin-left: 16px;
@@ -109,7 +109,7 @@ onMounted(async () => {
 
 .links a:hover,
 .links a.on {
-  color: #00e5ff;
+  color: #ffffff;
 }
 
 .container {
@@ -139,16 +139,16 @@ h1 {
 
 .uname {
   font-size: 13px;
-  color: #c8c8d8;
+  color: #c8c8c8;
 }
 
 .badge {
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(0, 229, 255, 0.15);
-  color: #00e5ff;
-  border: 1px solid rgba(0, 229, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .logout {
@@ -157,19 +157,19 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   background: transparent;
-  color: #8a8aa0;
+  color: #8a8a8a;
   cursor: pointer;
   font-family: inherit;
 }
 
 .logout:hover {
-  color: #ff6b6b;
-  border-color: rgba(255, 107, 107, 0.4);
+  color: #bbbbbb;
+  border-color: rgba(187, 187, 187, 0.4);
 }
 
 .subtitle {
   font-size: 13px;
-  color: #8a8aa0;
+  color: #8a8a8a;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
@@ -177,7 +177,7 @@ h1 {
 }
 
 .subtitle.warn {
-  color: #ff6b6b;
+  color: #bbbbbb;
 }
 
 .dot {
@@ -188,13 +188,13 @@ h1 {
 }
 
 .dot.ok {
-  background: #2ee59d;
-  box-shadow: 0 0 6px #2ee59d;
+  background: #ffffff;
+  box-shadow: 0 0 6px #ffffff;
 }
 
 .dot.bad {
-  background: #ff6b6b;
-  box-shadow: 0 0 6px #ff6b6b;
+  background: #bbbbbb;
+  box-shadow: 0 0 6px #bbbbbb;
 }
 
 .presets {
@@ -206,10 +206,10 @@ h1 {
 
 .presets button {
   padding: 10px 0;
-  border: 1px solid rgba(0, 229, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 10px;
-  background: rgba(0, 229, 255, 0.08);
-  color: #00e5ff;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -217,7 +217,7 @@ h1 {
 }
 
 .presets button:hover:not(:disabled) {
-  background: rgba(0, 229, 255, 0.2);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .reset {
@@ -225,7 +225,7 @@ h1 {
   padding: 14px;
   border: none;
   border-radius: 12px;
-  background: #ff6b6b;
+  background: #bbbbbb;
   color: #fff;
   font-size: 15px;
   font-weight: 700;
@@ -246,7 +246,7 @@ button:disabled {
 .footer {
   text-align: center;
   font-size: 12px;
-  color: #55556a;
+  color: #555555;
   margin-top: 24px;
 }
 </style>
