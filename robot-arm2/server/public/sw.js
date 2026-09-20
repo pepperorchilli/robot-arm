@@ -12,7 +12,7 @@
 // 对个人站点来说，这点网络开销远小于"改了看不到"的困扰。
 
 // 版本号一改，旧缓存在 activate 时会被清掉（用户的旧缓存就是这么清掉的）
-const CACHE = 'robot-arm-v2';
+const CACHE = 'robot-arm-v3';
 
 self.addEventListener('install', () => {
   // 不做预缓存：网络优先策略下，资源会在首次访问时自然进缓存。
