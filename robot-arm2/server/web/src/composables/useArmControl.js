@@ -1,4 +1,4 @@
-import { ref, reactive, readonly } from 'vue'
+import { ref, reactive, computed, readonly } from 'vue'
 
 // 舵机名称，顺序与固件一致（对应 SO-ARM101 的 6 个关节，自下而上）
 export const SERVO_NAMES = ['底座', '肩部', '肘部', '腕俯仰', '腕旋转', '夹爪']
@@ -36,40 +36,33 @@ export function useArmControl(options = {}) {
   const online = ref(true)   // 服务器/设备是否可用
   const sending = ref(false)
 
-  // 登录状态：控制页公开可见，但控制需要登录
-  const authed = ref(false)
+  // 登录状态：控制机械臂需要登录（全站统一账号）
+  // 未登录时不在这里登录 —— 直接跳转到 /login，登录后跳回来
+  const account = ref(null)
   const checkingAuth = ref(true)
+  const authed = computed(() => !!account.value)
 
   async function checkAuth() {
     checkingAuth.value = true
     try {
-      const res = await fetch('/api/auth')
-      authed.value = (await res.json()).authed === true
+      const res = await fetch('/api/me')
+      const data = await res.json()
+      account.value = data.authed ? data.account : null
     } catch {
-      authed.value = false
+      account.value = null
     } finally {
       checkingAuth.value = false
     }
   }
 
-  async function login(password) {
-    const res = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || '登录失败')
-    }
-    authed.value = true
-    status.value = '已登录，可以开始控制'
+  /** 未登录就跳转到登录页，并记住当前地址 */
+  function goLogin() {
+    location.replace('/login?next=' + encodeURIComponent(location.pathname));
   }
 
   async function logout() {
     try { await fetch('/api/logout', { method: 'POST' }) } catch { /* 忽略 */ }
-    authed.value = false
-    status.value = '已退出登录'
+    location.href = '/';
   }
 
   // 每个舵机的节流计时器：拖滑块会高频触发，
@@ -82,10 +75,10 @@ export function useArmControl(options = {}) {
     try {
       const res = await fetch(`/set?servo=${index}&angle=${angle}`)
 
-      // 401：登录过期或未登录 → 退回登录界面
+      // 401：登录过期或未登录 → 跳转到登录页
       if (res.status === 401) {
-        authed.value = false
-        status.value = '登录已过期，请重新登录'
+        status.value = '登录已过期，正在跳转到登录页…'
+        goLogin()
         return false
       }
 
@@ -165,10 +158,11 @@ export function useArmControl(options = {}) {
     status,
     online: readonly(online),
     sending: readonly(sending),
-    authed: readonly(authed),
+    account: readonly(account),
+    authed,
     checkingAuth: readonly(checkingAuth),
     checkAuth,
-    login,
+    goLogin,
     logout,
     setAngle,
     setAngleNow,

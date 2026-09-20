@@ -27,6 +27,40 @@ GRANT ALL PRIVILEGES ON robot_arm_demo.* TO 'arm_app'@'localhost';
 FLUSH PRIVILEGES;
 
 -- ---------------------------------------------------------------
+-- 账号表
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS accounts (
+  id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  username      VARCHAR(32)  NOT NULL,
+  nickname      VARCHAR(32)  NOT NULL,
+  -- 只存哈希，永不存明文。算法见 server/accounts.js（scrypt）
+  password_hash VARCHAR(255) NOT NULL,
+  -- 第一个注册的账号自动成为管理员
+  role          ENUM('admin','user') NOT NULL DEFAULT 'user',
+  created_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------
+-- 会话表
+--
+-- 放在数据库而不是进程内存里，是为了让 Python 的图书管理服务
+-- 也能校验同一个 token —— 这样全站就是一套账号，不用服务间调用。
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sessions (
+  token      CHAR(48)     NOT NULL,
+  account_id INT UNSIGNED NOT NULL,
+  expire_at  DATETIME(3)  NOT NULL,
+  PRIMARY KEY (token),
+  KEY idx_expire (expire_at),
+  KEY idx_account (account_id),
+  CONSTRAINT fk_sessions_account
+    FOREIGN KEY (account_id) REFERENCES accounts (id)
+    ON DELETE CASCADE          -- 删账号时自动清掉它的会话
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------
 -- 留言表
 -- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS messages (

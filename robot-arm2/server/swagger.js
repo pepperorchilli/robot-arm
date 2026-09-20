@@ -34,8 +34,9 @@ const options = {
       { url: 'http://localhost:3000', description: '本地开发' },
     ],
     tags: [
-      { name: '遥控', description: '机械臂舵机控制（经 WebSocket 转发给 ESP32）' },
-      { name: '留言板', description: '官网留言与博主回复' },
+      { name: '账号', description: '注册 / 登录 / 退出（全站统一账号）' },
+      { name: '遥控', description: '机械臂舵机控制（需登录，经 WebSocket 转发给 ESP32）' },
+      { name: '留言板', description: '留言（浏览与发言需登录，回复与删除需管理员）' },
     ],
     components: {
       schemas: {

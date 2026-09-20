@@ -14,43 +14,22 @@ const swaggerUi = require('swagger-ui-express');
 
 let esp32 = null; // 当前连进来的 ESP32（只存一台）
 
-// ==================== 遥控鉴权 ====================
-//
-// 机械臂控制页是公开的（谁都能看到），但**控制需要登录**——
-// 否则任何人都能把你的舵机玩坏。
-//
-// 方案：密码登录 → 签发随机 token → 存内存 + 写 httpOnly cookie。
-// 用内存存而不是签名的无状态 token，好处是重启即失效、且可以主动踢人；
-// 代价是服务重启后需要重新登录（对这个场景可以接受）。
+// 把 async 路由的错误统一接住，避免一个异常把整个进程带崩
+// （必须定义在这里 —— 下面的鉴权中间件也要用它）
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-const sessions = new Map();                 // token -> 过期时间戳
-const SESSION_TTL = 7 * 24 * 3600 * 1000;   // 7 天
+// ==================== 账号与鉴权 ====================
+//
+// 全站一套账号：访客注册后登录，凭会话 cookie 访问各功能。
+//
+// 会话存在 MySQL（见 accounts.js），不存进程内存 ——
+// 这样 Python 写的图书管理服务能查同一张表校验同一个 token，
+// 全站统一登录态，不需要服务间调用。
+
+const accounts = require('./accounts');
+
 const COOKIE_NAME = 'arm_token';
-
-function issueToken() {
-  const token = crypto.randomBytes(24).toString('hex');
-  sessions.set(token, Date.now() + SESSION_TTL);
-  return token;
-}
-
-function isValidToken(token) {
-  if (!token) return false;
-  const expireAt = sessions.get(token);
-  if (!expireAt) return false;
-  if (Date.now() > expireAt) {
-    sessions.delete(token);
-    return false;
-  }
-  return true;
-}
-
-// 定期清理过期 token，避免内存无限增长
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, expireAt] of sessions) {
-    if (now > expireAt) sessions.delete(token);
-  }
-}, 3600 * 1000);
+const SESSION_TTL = accounts.SESSION_TTL_MS;
 
 function parseCookie(req, name) {
   const raw = req.headers.cookie;
@@ -65,12 +44,41 @@ function parseCookie(req, name) {
   return null;
 }
 
-/** 鉴权中间件：cookie 或 X-Auth-Token 头里有有效 token 才放行 */
-function requireAuth(req, res, next) {
-  const token = parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
-  if (isValidToken(token)) return next();
-  res.status(401).json({ error: '请先登录' });
+/** 从请求里取出当前账号，未登录返回 null */
+function currentToken(req) {
+  return parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
 }
+
+/**
+ * 鉴权中间件。
+ *   requireAuth  —— 需登录
+ *   requireAdmin —— 需管理员
+ * 通过后把账号挂在 req.account 上供路由使用。
+ */
+function authMiddleware(needAdmin) {
+  return wrap(async (req, res, next) => {
+    const token = currentToken(req);
+    const account = await accounts.getSession(token);
+    if (!account) {
+      return res.status(401).json({ error: '请先登录' });
+    }
+    if (needAdmin && account.role !== 'admin') {
+      return res.status(403).json({ error: '需要管理员权限' });
+    }
+    req.account = account;
+    next();
+  });
+}
+
+const requireAuth = authMiddleware(false);
+const requireAdmin = authMiddleware(true);
+
+// 定期清理过期会话（存数据库，不会无限增长，但清一下更干净）
+setInterval(() => {
+  accounts.cleanupExpired()
+    .then(n => { if (n) console.log(`清理了 ${n} 个过期会话`); })
+    .catch(e => console.error('清理会话失败:', e.message));
+}, 6 * 3600 * 1000);
 
 // ==================== 登录限流 ====================
 //
@@ -150,40 +158,91 @@ app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 把 async 路由的错误统一接住，避免一个异常把整个进程带崩
-const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// ---------- 账号：注册 / 登录 / 登出 ----------
 
-// ---------- 登录 ----------
 /**
  * @openapi
- * /api/login:
+ * /api/register:
  *   post:
- *     tags: [遥控]
- *     summary: 登录（控制机械臂需要）
+ *     tags: [账号]
+ *     summary: 注册账号
  *     description: |
- *       机械臂控制页公开可见，但**控制需要登录**。
- *       登录成功后服务器签发随机 token，写入 httpOnly cookie。
+ *       **第一个注册的账号自动成为管理员**，之后注册的都是普通用户。
+ *
+ *       密码用 scrypt 哈希后存储，数据库中不保存明文。
+ *       注册成功后自动登录（写入会话 cookie）。
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [password]
+ *             required: [username, password, nickname]
  *             properties:
+ *               username:
+ *                 type: string
+ *                 description: 3-32 位，字母/数字/下划线/连字符
+ *                 example: qiudai
  *               password:
  *                 type: string
- *                 example: '你的管理员密码'
+ *                 description: 至少 6 位
+ *                 example: '你的密码'
+ *               nickname:
+ *                 type: string
+ *                 description: 显示名称
+ *                 example: 阿岱
  *     responses:
  *       200:
- *         description: 登录成功，已写入 cookie
- *       401:
- *         description: 密码错误
+ *         description: 注册成功并已登录
+ *       400:
+ *         description: 参数不合法（用户名格式、密码长度等）
+ *       409:
+ *         description: 用户名已被占用
  */
-app.post('/api/login', (req, res) => {
+app.post('/api/register', wrap(async (req, res) => {
+  const { username, password, nickname } = req.body || {};
+  const account = await accounts.register(username, password, nickname);
+  const token = await accounts.createSession(account.id);
+  res.setHeader('Set-Cookie',
+    `${COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL / 1000}; HttpOnly; SameSite=Lax`);
+  res.json({ ok: true, account });
+}));
+
+/**
+ * @openapi
+ * /api/login:
+ *   post:
+ *     tags: [账号]
+ *     summary: 登录
+ *     description: |
+ *       登录成功后签发会话 token，写入 httpOnly cookie。
+ *
+ *       有频率限制：同一 IP 十分钟内失败 5 次，封禁 15 分钟。
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [username, password]
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 example: qiudai
+ *               password:
+ *                 type: string
+ *                 example: '你的密码'
+ *     responses:
+ *       200:
+ *         description: 登录成功
+ *       401:
+ *         description: 用户名或密码错误
+ *       429:
+ *         description: 尝试过于频繁
+ */
+app.post('/api/login', wrap(async (req, res) => {
   const ip = clientIp(req);
 
-  // 先看是否已被封禁
   const limit = checkRateLimit(ip);
   if (!limit.allowed) {
     res.setHeader('Retry-After', limit.retryAfterSec);
@@ -192,52 +251,65 @@ app.post('/api/login', (req, res) => {
     });
   }
 
-  const { password } = req.body || {};
-  if (password !== config.ADMIN_PASSWORD) {
-    recordFailure(ip);
-    return res.status(401).json({ error: '密码错误' });
+  const { username, password } = req.body || {};
+  let account;
+  try {
+    account = await accounts.login(username, password);
+  } catch (e) {
+    if (e instanceof accounts.InvalidCredentialsError) {
+      recordFailure(ip);
+      return res.status(401).json({ error: e.message });
+    }
+    throw e;
   }
 
-  clearFailures(ip);   // 登录成功，清空失败计数
-  const token = issueToken();
-  // httpOnly：JS 读不到，防 XSS 窃取；sameSite=lax：防 CSRF
+  clearFailures(ip);
+  const token = await accounts.createSession(account.id);
   res.setHeader('Set-Cookie',
     `${COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL / 1000}; HttpOnly; SameSite=Lax`);
-  console.log('✅ 有人登录了遥控台');
-  res.json({ ok: true });
-});
+  console.log(`✅ ${account.nickname}（${account.username}）登录了`);
+  res.json({ ok: true, account });
+}));
 
 /**
  * @openapi
  * /api/logout:
  *   post:
- *     tags: [遥控]
+ *     tags: [账号]
  *     summary: 退出登录
  *     responses:
  *       200:
  *         description: 已清除登录状态
  */
-app.post('/api/logout', (req, res) => {
-  const token = parseCookie(req, COOKIE_NAME);
-  if (token) sessions.delete(token);
+app.post('/api/logout', wrap(async (req, res) => {
+  await accounts.deleteSession(currentToken(req));
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
   res.json({ ok: true });
-});
+}));
 
 /**
  * @openapi
- * /api/auth:
+ * /api/me:
  *   get:
- *     tags: [遥控]
- *     summary: 查询当前登录状态
+ *     tags: [账号]
+ *     summary: 当前登录的账号
  *     responses:
  *       200:
- *         description: 返回 { authed: true/false }
+ *         description: |
+ *           未登录时返回 `{ authed: false }`；
+ *           已登录返回 `{ authed: true, account: {...} }`
  */
-app.get('/api/auth', (req, res) => {
-  const token = parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
-  res.json({ authed: isValidToken(token) });
-});
+app.get('/api/me', wrap(async (req, res) => {
+  const account = await accounts.getSession(currentToken(req));
+  if (!account) return res.json({ authed: false });
+  res.json({ authed: true, account });
+}));
+
+// 兼容旧路径（前端曾用 /api/auth）
+app.get('/api/auth', wrap(async (req, res) => {
+  const account = await accounts.getSession(currentToken(req));
+  res.json({ authed: !!account, account: account || null });
+}));
 
 // ---------- 遥控命令：浏览器 -> ESP32 ----------
 /**
@@ -328,7 +400,7 @@ app.get('/set', requireAuth, (req, res) => {
  *               items:
  *                 $ref: '#/components/schemas/Message'
  */
-app.get('/api/messages', wrap(async (req, res) => {
+app.get('/api/messages', requireAuth, wrap(async (req, res) => {
   res.json(await store.list());
 }));
 
@@ -368,12 +440,13 @@ app.get('/api/messages', wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.post('/api/messages', wrap(async (req, res) => {
-  const { nickname, content } = req.body || {};
-  if (!nickname || !content) {
-    return res.status(400).json({ error: '昵称和内容不能为空' });
+app.post('/api/messages', requireAuth, wrap(async (req, res) => {
+  const { content } = req.body || {};
+  if (!content || !String(content).trim()) {
+    return res.status(400).json({ error: '留言内容不能为空' });
   }
-  res.json(await store.add(String(nickname).trim(), String(content).trim()));
+  // 昵称取自登录账号，不让客户端随便传 —— 否则可以冒充任何人发言
+  res.json(await store.add(req.account.nickname, String(content).trim()));
 }));
 
 /**
@@ -425,7 +498,7 @@ app.post('/api/messages', wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.post('/api/messages/:id/reply', requireAuth, wrap(async (req, res) => {
+app.post('/api/messages/:id/reply', requireAdmin, wrap(async (req, res) => {
   const { content } = req.body || {};
   const m = await store.reply(Number(req.params.id), String(content || '').trim());
   if (!m) return res.status(404).json({ error: '留言不存在' });
@@ -476,7 +549,7 @@ app.post('/api/messages/:id/reply', requireAuth, wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.delete('/api/messages/:id', requireAuth, wrap(async (req, res) => {
+app.delete('/api/messages/:id', requireAdmin, wrap(async (req, res) => {
   const ok = await store.remove(Number(req.params.id));
   if (!ok) return res.status(404).json({ error: '留言不存在' });
   res.json({ ok: true });
@@ -485,11 +558,24 @@ app.delete('/api/messages/:id', requireAuth, wrap(async (req, res) => {
 // ---------- 页面（无后缀 URL）----------
 // /control 是 Vue 3 单页应用，构建产物在 public/control/，
 // 由上面的 express.static 直接处理（访问 /control 会自动跳到 /control/）
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/messages', (req, res) => res.sendFile(path.join(__dirname, 'public', 'messages.html')));
 app.get('/download', (req, res) => res.sendFile(path.join(__dirname, 'public', 'download.html')));
 
 // ---------- 统一错误处理 ----------
 app.use((err, req, res, next) => {
+  // 业务异常：把原始提示返回给用户，而不是笼统的 500
+  if (err instanceof accounts.UsernameTakenError) {
+    return res.status(409).json({ error: err.message });
+  }
+  if (err instanceof accounts.ValidationError) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (err instanceof accounts.AccountError) {
+    return res.status(400).json({ error: err.message });
+  }
+
   console.error('请求出错:', err.message);
   res.status(500).json({ error: '服务器内部错误' });
 });

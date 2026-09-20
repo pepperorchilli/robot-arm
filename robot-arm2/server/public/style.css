@@ -111,3 +111,33 @@ button.mini:hover {
   color: #00e5ff;
   border-color: rgba(0, 229, 255, .4);
 }
+
+/* ---------- 登录状态栏（各页面复用）---------- */
+#userbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.userbar-name {
+  font-size: 13px;
+  color: #c8c8d8;
+}
+
+a.userbar-login {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 229, 255, .3);
+  background: rgba(0, 229, 255, .1);
+  color: #00e5ff;
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: all .15s;
+}
+
+a.userbar-login:hover {
+  background: rgba(0, 229, 255, .2);
+  border-color: rgba(0, 229, 255, .5);
+}

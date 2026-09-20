@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted } from 'vue'
 import ServoCard from './components/ServoCard.vue'
 import { useArmControl, SERVO_NAMES, PRESETS } from './composables/useArmControl.js'
 
@@ -8,10 +8,11 @@ const {
   status,
   online,
   sending,
+  account,
   authed,
   checkingAuth,
   checkAuth,
-  login,
+  goLogin,
   logout,
   setAngle,
   setAngleNow,
@@ -19,28 +20,11 @@ const {
   applyPreset,
 } = useArmControl()
 
-const password = ref('')
-const loginError = ref('')
-const loggingIn = ref(false)
-
-onMounted(checkAuth)
-
-async function doLogin() {
-  if (!password.value) {
-    loginError.value = '请输入密码'
-    return
-  }
-  loggingIn.value = true
-  loginError.value = ''
-  try {
-    await login(password.value)
-    password.value = ''
-  } catch (e) {
-    loginError.value = e.message
-  } finally {
-    loggingIn.value = false
-  }
-}
+onMounted(async () => {
+  await checkAuth()
+  // 未登录直接送去登录页，登录后会自动跳回来
+  if (!authed.value) goLogin()
+})
 </script>
 
 <template>
@@ -55,37 +39,21 @@ async function doLogin() {
   </nav>
 
   <div class="container">
-    <h1>机械臂遥控</h1>
-
-    <!-- ============ 正在检查登录状态 ============ -->
-    <p v-if="checkingAuth" class="subtitle">正在检查登录状态…</p>
-
-    <!-- ============ 未登录：显示登录框 ============ -->
-    <div v-else-if="!authed" class="login-box">
-      <div class="lock-icon">🔒</div>
-      <h2>需要登录才能控制</h2>
-      <p class="login-hint">
-        机械臂对所有人可见，但控制需要密码 —— 避免被陌生人误操作。
-      </p>
-      <input
-        type="password"
-        v-model="password"
-        placeholder="请输入控制密码"
-        @keyup.enter="doLogin"
-        :disabled="loggingIn"
-      />
-      <p v-if="loginError" class="login-error">{{ loginError }}</p>
-      <button class="login-btn" @click="doLogin" :disabled="loggingIn">
-        {{ loggingIn ? '登录中…' : '登录' }}
-      </button>
+    <div class="titlebar">
+      <h1>机械臂遥控</h1>
+      <div v-if="account" class="userbar">
+        <span class="uname">{{ account.nickname }}</span>
+        <span v-if="account.role === 'admin'" class="badge">管理员</span>
+        <button class="logout" @click="logout">退出</button>
+      </div>
     </div>
 
-    <!-- ============ 已登录：显示控制台 ============ -->
-    <template v-else>
+    <p v-if="checkingAuth" class="subtitle">正在检查登录状态…</p>
+
+    <template v-else-if="authed">
       <p class="subtitle" :class="{ warn: !online }">
         <span class="dot" :class="online ? 'ok' : 'bad'"></span>
         {{ status }}
-        <button class="logout" @click="logout">退出登录</button>
       </p>
 
       <div class="presets">
@@ -109,6 +77,8 @@ async function doLogin() {
 
       <div class="footer">Vue 3 + Vite · WebSocket 中转</div>
     </template>
+
+    <p v-else class="subtitle">正在跳转到登录页…</p>
   </div>
 </template>
 
@@ -148,9 +118,53 @@ async function doLogin() {
   padding: 0 16px 40px;
 }
 
+.titlebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
 h1 {
   font-size: 24px;
-  margin-bottom: 6px;
+}
+
+.userbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.uname {
+  font-size: 13px;
+  color: #c8c8d8;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 229, 255, 0.15);
+  color: #00e5ff;
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+
+.logout {
+  padding: 5px 10px;
+  font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: #8a8aa0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.logout:hover {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.4);
 }
 
 .subtitle {
@@ -183,100 +197,6 @@ h1 {
   box-shadow: 0 0 6px #ff6b6b;
 }
 
-.logout {
-  margin-left: auto;
-  padding: 4px 10px;
-  font-size: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: transparent;
-  color: #8a8aa0;
-  cursor: pointer;
-}
-
-.logout:hover {
-  color: #ff6b6b;
-  border-color: rgba(255, 107, 107, 0.4);
-}
-
-/* ---------- 登录框 ---------- */
-.login-box {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 32px 24px;
-  text-align: center;
-  margin-top: 32px;
-}
-
-.lock-icon {
-  font-size: 36px;
-  margin-bottom: 12px;
-}
-
-.login-box h2 {
-  font-size: 17px;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-
-.login-hint {
-  font-size: 13px;
-  color: #8a8aa0;
-  margin-bottom: 22px;
-  line-height: 1.6;
-}
-
-.login-box input {
-  width: 100%;
-  max-width: 280px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  text-align: center;
-}
-
-.login-box input:focus {
-  border-color: rgba(0, 229, 255, 0.5);
-}
-
-.login-error {
-  color: #ff6b6b;
-  font-size: 13px;
-  margin-top: 10px;
-}
-
-.login-btn {
-  display: block;
-  width: 100%;
-  max-width: 280px;
-  margin: 16px auto 0;
-  padding: 12px;
-  border: none;
-  border-radius: 10px;
-  background: #00e5ff;
-  color: #1a1a2e;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.login-btn:hover:not(:disabled) {
-  opacity: 0.85;
-}
-
-.login-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---------- 控制台 ---------- */
 .presets {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

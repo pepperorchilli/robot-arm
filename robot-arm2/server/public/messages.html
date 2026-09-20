@@ -10,33 +10,34 @@
 </head>
 <body>
 <nav class="nav">
-  <a href="/" class="brand">机械臂</a>
+  <a href="/" class="brand">个人网站</a>
   <div class="links">
     <a href="/">首页</a>
-    <a href="/control">遥控</a>
-    <a href="/messages" class="on">留言</a>
-    <a href="/download">下载</a>
+    <a href="/control">机械臂</a>
+    <a href="/library/">图书管理</a>
+    <a href="/messages" class="on">留言板</a>
   </div>
 </nav>
 <div class="container">
   <div class="titlebar">
     <div>
       <h1>给我留言</h1>
-      <p class="subtitle">你的想法我都会看到</p>
+      <p class="subtitle" id="rolehint">你的想法我都会看到</p>
     </div>
-    <!-- 登录后变成「管理员 + 退出」；登录一次即可回复/删除，不用每次输密码 -->
-    <div id="authbar"></div>
+    <!-- 登录状态：昵称 + 管理员标识 + 退出 -->
+    <div id="userbar"></div>
   </div>
 
   <div class="c">
-    <input type="text" id="nickname" placeholder="你的昵称" maxlength="20">
+    <!-- 昵称不用填 —— 用登录账号的昵称，防止冒名 -->
     <textarea id="content" placeholder="想说什么？" maxlength="500"></textarea>
     <button class="btn" onclick="postMsg()">发布留言</button>
   </div>
 
   <div id="list"></div>
-  <div class="footer">留言会保存到服务器</div>
+  <div class="footer">留言保存在 MySQL</div>
 </div>
+<script src="/auth.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
