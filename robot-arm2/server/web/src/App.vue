@@ -107,7 +107,11 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* 导航与内容都要压在星空画布之上 ——
+   画布是 fixed + z-index:0，没有层级的普通内容会被它盖住 */
 .nav {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -137,6 +141,8 @@ onMounted(async () => {
 }
 
 .container {
+  position: relative;
+  z-index: 1;                /* 压在星空之上，否则内容会被画布盖住 */
   max-width: 720px;
   margin: 0 auto;
   padding: 0 16px 40px;
