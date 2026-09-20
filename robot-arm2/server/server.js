@@ -69,7 +69,7 @@ function parseCookie(req, name) {
 function requireAuth(req, res, next) {
   const token = parseCookie(req, COOKIE_NAME) || req.get('X-Auth-Token');
   if (isValidToken(token)) return next();
-  res.status(401).send('需要登录后才能控制机械臂');
+  res.status(401).json({ error: '请先登录' });
 }
 
 // ==================== 登录限流 ====================
@@ -381,8 +381,10 @@ app.post('/api/messages', wrap(async (req, res) => {
  * /api/messages/{id}/reply:
  *   post:
  *     tags: [留言板]
- *     summary: 回复留言（博主）
- *     description: 需要管理员密码，密码错误返回 401。
+ *     summary: 回复留言（管理员）
+ *     description: |
+ *       需要管理员身份 —— 先调用 `/api/login` 登录，
+ *       之后本接口通过会话 cookie 鉴权，不再需要传密码。
  *     parameters:
  *       - in: path
  *         name: id
@@ -397,15 +399,12 @@ app.post('/api/messages', wrap(async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [content, password]
+ *             required: [content]
  *             properties:
  *               content:
  *                 type: string
  *                 maxLength: 500
  *                 example: 谢谢支持！
- *               password:
- *                 type: string
- *                 example: '123456'
  *     responses:
  *       200:
  *         description: 回复成功，返回更新后的留言
@@ -414,7 +413,7 @@ app.post('/api/messages', wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Message'
  *       401:
- *         description: 密码错误
+ *         description: 未登录
  *         content:
  *           application/json:
  *             schema:
@@ -426,11 +425,8 @@ app.post('/api/messages', wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.post('/api/messages/:id/reply', wrap(async (req, res) => {
-  const { content, password } = req.body || {};
-  if (password !== config.ADMIN_PASSWORD) {
-    return res.status(401).json({ error: '密码错误' });
-  }
+app.post('/api/messages/:id/reply', requireAuth, wrap(async (req, res) => {
+  const { content } = req.body || {};
   const m = await store.reply(Number(req.params.id), String(content || '').trim());
   if (!m) return res.status(404).json({ error: '留言不存在' });
   res.json(m);
@@ -441,9 +437,11 @@ app.post('/api/messages/:id/reply', wrap(async (req, res) => {
  * /api/messages/{id}:
  *   delete:
  *     tags: [留言板]
- *     summary: 删除留言（博主）
+ *     summary: 删除留言（管理员）
  *     description: |
- *       需要管理员密码。
+ *       需要管理员身份 —— 先调用 `/api/login` 登录，
+ *       之后本接口通过会话 cookie 鉴权，不再需要传密码。
+ *
  *       该留言下的回复会由数据库外键 `ON DELETE CASCADE` 自动清理，
  *       不会留下孤儿数据。
  *     parameters:
@@ -454,17 +452,6 @@ app.post('/api/messages/:id/reply', wrap(async (req, res) => {
  *         schema:
  *           type: integer
  *           example: 1
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [password]
- *             properties:
- *               password:
- *                 type: string
- *                 example: '123456'
  *     responses:
  *       200:
  *         description: 删除成功
@@ -477,7 +464,7 @@ app.post('/api/messages/:id/reply', wrap(async (req, res) => {
  *                   type: boolean
  *                   example: true
  *       401:
- *         description: 密码错误
+ *         description: 未登录
  *         content:
  *           application/json:
  *             schema:
@@ -489,11 +476,7 @@ app.post('/api/messages/:id/reply', wrap(async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.delete('/api/messages/:id', wrap(async (req, res) => {
-  const { password } = req.body || {};
-  if (password !== config.ADMIN_PASSWORD) {
-    return res.status(401).json({ error: '密码错误' });
-  }
+app.delete('/api/messages/:id', requireAuth, wrap(async (req, res) => {
   const ok = await store.remove(Number(req.params.id));
   if (!ok) return res.status(404).json({ error: '留言不存在' });
   res.json({ ok: true });

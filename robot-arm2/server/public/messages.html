@@ -19,8 +19,14 @@
   </div>
 </nav>
 <div class="container">
-  <h1>给我留言</h1>
-  <p class="subtitle">你的想法我都会看到</p>
+  <div class="titlebar">
+    <div>
+      <h1>给我留言</h1>
+      <p class="subtitle">你的想法我都会看到</p>
+    </div>
+    <!-- 登录后变成「管理员 + 退出」；登录一次即可回复/删除，不用每次输密码 -->
+    <div id="authbar"></div>
+  </div>
 
   <div class="c">
     <input type="text" id="nickname" placeholder="你的昵称" maxlength="20">

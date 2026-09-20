@@ -105,8 +105,24 @@ ESP32 未连接时返回 **503** —— 前端和手势模块以此判断设备�
 |---|---|---|
 | GET | `/api/messages` | 留言列表（含回复） |
 | POST | `/api/messages` | 发表留言 |
-| POST | `/api/messages/:id/reply` | 回复（需管理员密码） |
-| DELETE | `/api/messages/:id` | 删除（需管理员密码） |
+| POST | `/api/messages/:id/reply` | 回复（需管理员身份） |
+| DELETE | `/api/messages/:id` | 删除（需管理员身份） |
+
+### 登录与权限
+
+**登录一次即为管理员**，之后控制机械臂、回复留言、删除留言都不再需要输密码。
+
+| 接口 | 说明 |
+|---|---|
+| `POST /api/login` | 密码换 token，写入 httpOnly cookie |
+| `POST /api/logout` | 退出登录 |
+| `GET /api/auth` | 查询登录状态 |
+
+- 机械臂的 `/set` 和控制台需要登录（防止陌生人乱动舵机）
+- 留言板**浏览和发留言是公开的**，只有回复/删除需要管理员身份
+- 登录接口有频率限制：同一 IP 十分钟内失败 5 次封禁 15 分钟
+
+> 手势模块等本地程序用 `X-Auth-Token` 头携带 token（见 `gesture-control/arm_client.py`）。
 
 ---
 
