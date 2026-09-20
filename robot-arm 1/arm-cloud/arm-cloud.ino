@@ -171,7 +171,11 @@ void setup() {
 
   // ---- 连服务器 ----
   // token 放在连接地址里，服务器会校验，不对直接断开
-  String path = "/?token=" + String(ESP32_TOKEN);
+  // ⚠️ 路径必须是 /ws，不能是 /
+  //    网站前面挂了 Nginx，/ 要留给静态首页；WebSocket 只能走独立路径。
+  //    Nginx 无法按请求头区分 location，靠路径分流。
+  //    （服务器只校验 token 不校验路径，所以改路径不影响后端）
+  String path = "/ws?token=" + String(ESP32_TOKEN);
   ws.begin(SERVER_HOST, SERVER_PORT, path.c_str());
   ws.onEvent(onMessage);
   ws.setReconnectInterval(5000);   // 断了自动重连
