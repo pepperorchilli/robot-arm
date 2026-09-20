@@ -12,7 +12,7 @@
     gap: 10px; margin-bottom: 10px;
   }
 
-  /* 版本切换（做小一点，别抢控制面板的位置） */
+  /* 版本切换 */
   .verbar { display: flex; gap: 6px; }
   .verbar a {
     padding: 7px 14px; border-radius: 8px;
@@ -37,9 +37,42 @@
     margin-bottom: 10px; min-height: 18px;
   }
 
-  /* 控制面板压缩一点，一屏能多看几个轴 */
-  .c { padding: 10px 12px; margin-bottom: 7px; }
-  .c .v { font-size: 18px; }
+  /* ---------- 舵机行：一个轴占一行 ---------- */
+  .sl {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 10px; margin-bottom: 6px;
+    border-radius: 10px;
+    background: rgba(255,255,255,.06);
+  }
+  .sl .n {
+    flex: 0 0 3.2em;
+    font-size: 12.5px; font-weight: 600; color: #e8e8e8;
+  }
+  .sl input[type=range] {
+    flex: 1; min-width: 0;
+    -webkit-appearance: none; appearance: none;
+    height: 5px; border-radius: 3px;
+    background: rgba(255,255,255,.16);
+    outline: none; cursor: pointer;
+    margin: 0;
+  }
+  .sl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; border: 2px solid #000; cursor: pointer;
+  }
+  .sl .adj {
+    flex: 0 0 auto; width: 26px; padding: 4px 0;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+    background: rgba(255,255,255,.05); color: #bbb;
+    font-size: 10.5px; cursor: pointer; transition: all .15s;
+  }
+  .sl .adj:hover { background: rgba(255,255,255,.18); color: #fff; }
+  .sl .v {
+    flex: 0 0 2.6em; text-align: right;
+    font-size: 13px; font-weight: 700; color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
 
   /* 说明条放最下面 */
   .vintage-note {
@@ -53,6 +86,12 @@
     margin-top: 20px;
   }
   .vintage-note b { color: #ccc; font-weight: 600; }
+
+  @media (max-width: 380px) {
+    .sl .n { flex-basis: 2.6em; font-size: 11.5px; }
+    .sl .v { flex-basis: 2.2em; font-size: 12px; }
+    .sl .adj { width: 22px; font-size: 10px; }
+  }
 </style>
 </head>
 <body>
@@ -60,14 +99,13 @@
   <a href="/" class="brand">个人网站</a>
   <div class="links">
     <a href="/">首页</a>
-    <a href="/control/v2" class="on">机械臂</a>
+    <a href="/control/v1" class="on">机械臂</a>
     <a href="/library/">图书管理</a>
     <a href="/messages">留言板</a>
   </div>
 </nav>
 
 <div class="container">
-  <!-- 顶栏：版本切换在左，账号在右，一行放完 -->
   <div class="topbar">
     <div class="verbar">
       <a href="/control/v2">新版 6 轴</a>
@@ -76,17 +114,15 @@
     <div id="userbar"></div>
   </div>
 
-  <!-- 状态行：在线状态 + 上一条指令，压成一行 -->
   <p class="statusline">
     <span class="dot" id="dot"></span>
     <span id="statustext">检查中…</span>
   </p>
 
-  <!-- 控制面板紧跟在下面，不用滚动就能看到 -->
+  <!-- 控制面板紧跟在下面，一屏可见 -->
   <div id="cards"></div>
   <button class="btn" onclick="reset()">一键复位</button>
 
-  <!-- 说明放最下面，不占前面空间 -->
   <div class="vintage-note">
     <b>第一代控制台</b> —— 项目最初的样子：MG996R 模拟舵机 + PCA9685 驱动板，
     5 个自由度，原生 JavaScript 手写界面。<br>
@@ -96,20 +132,26 @@
 
 <script src="/auth.js"></script>
 <script>
-// ---------------- 第一代的界面逻辑（原样保留）----------------
+// ---------------- 第一代的控制逻辑（保留原实现）----------------
 const NAMES = ['底座', '大臂', '小臂', '手腕', '夹爪'];
 const N = 5;
 let last = [90, 90, 90, 90, 90];
 
-function card(i) {
-  return '<div class="c"><div class="h"><div class="n">' + NAMES[i] + '</div><div class="v" id="a' + i + '">90°</div></div>'
+// 每个轴一行：名称 · −5 −1 · 滑块 · +1 +5 · 角度
+function row(i) {
+  return '<div class="sl">'
+    + '<span class="n">' + NAMES[i] + '</span>'
+    + '<button class="adj" onclick="adj(' + i + ',-5)">−5</button>'
+    + '<button class="adj" onclick="adj(' + i + ',-1)">−1</button>'
     + '<input type="range" id="s' + i + '" min="0" max="180" value="90">'
-    + '<div class="p"><button onclick="go(' + i + ',0)">0°</button><button onclick="go(' + i + ',45)">45°</button><button onclick="go(' + i + ',90)" class="on">90°</button><button onclick="go(' + i + ',135)">135°</button><button onclick="go(' + i + ',180)">180°</button></div>'
-    + '<div class="f"><button onclick="adj(' + i + ',-5)">-5</button><button onclick="adj(' + i + ',-1)">-1</button><button onclick="adj(' + i + ',1)">+1</button><button onclick="adj(' + i + ',5)">+5</button></div></div>';
+    + '<button class="adj" onclick="adj(' + i + ',1)">+1</button>'
+    + '<button class="adj" onclick="adj(' + i + ',5)">+5</button>'
+    + '<span class="v" id="a' + i + '">90°</span>'
+    + '</div>';
 }
 
 let html = '';
-for (let i = 0; i < N; i++) html += card(i);
+for (let i = 0; i < N; i++) html += row(i);
 document.getElementById('cards').innerHTML = html;
 
 function send(i, a) {
@@ -127,22 +169,19 @@ for (let i = 0; i < N; i++) {
   s.addEventListener('change', () => send(i, +s.value));
 }
 
-function go(i, a) {
+function adj(i, d) {
+  const cur = parseInt(document.getElementById('a' + i).textContent);
+  const a = Math.min(180, Math.max(0, cur + d));
   document.getElementById('s' + i).value = a;
   document.getElementById('a' + i).textContent = a + '°';
   send(i, a);
 }
-function adj(i, d) {
-  const cur = parseInt(document.getElementById('a' + i).textContent);
-  go(i, Math.min(180, Math.max(0, cur + d)));
-}
+
 async function reset() {
-  for (let i = 0; i < N; i++) { go(i, 90); await new Promise(r => setTimeout(r, 150)); }
+  for (let i = 0; i < N; i++) { adj(i, 90 - parseInt(document.getElementById('a' + i).textContent)); await new Promise(r => setTimeout(r, 150)); }
 }
 
 // ---------------- 状态灯 + 登录守卫 ----------------
-let me = null;
-
 async function refreshDevice() {
   const r = await api('/api/device');
   const dot = document.getElementById('dot');
@@ -150,19 +189,19 @@ async function refreshDevice() {
   if (r.ok && r.data.online) {
     dot.className = 'dot ok';
     const m = Math.floor(r.data.onlineSeconds / 60);
-    txt.textContent = '机械臂在线' + (m > 0 ? '（已连接 ' + m + ' 分钟）' : '');
+    txt.textContent = '在线' + (m > 0 ? ' ' + m + ' 分钟' : '');
   } else {
     dot.className = 'dot bad';
-    txt.textContent = '机械臂离线 —— 指令发不出去';
+    txt.textContent = '离线';
   }
 }
 
 (async () => {
-  me = await requireLogin();
+  const me = await requireLogin();
   if (!me) return;
   renderUserBar('userbar', me);
   await refreshDevice();
-  setInterval(refreshDevice, 5000);   // 每 5 秒刷新一次状态
+  setInterval(refreshDevice, 5000);
 })();
 </script>
 <script src="/starfield.js"></script>

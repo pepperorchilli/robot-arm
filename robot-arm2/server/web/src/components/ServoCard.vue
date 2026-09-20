@@ -1,36 +1,33 @@
 <script setup>
 /**
- * 单个舵机的控制卡片
+ * 单个舵机 —— 紧凑的一行
  *
- * 用 defineModel() 实现 v-model：父组件写 v-model="angles[i]" 即可双向绑定，
- * 子组件不需要知道父组件怎么存数据。
+ * 以前每个舵机占三行（滑块 / 5 个预设角度 / 4 个微调按钮），
+ * 6 个轴加起来 660px，一屏放不下，必须滚动。
+ * 改成一行后 6 个轴约 280px，一屏能全部看到。
+ *
+ * 角度调整方式保留三种：
+ *   拖滑块（粗调）· ±1 / ±5 按钮（微调）· 顶部预设姿态（整体）
  */
 const model = defineModel({ type: Number, required: true })
 
-const props = defineProps({
+defineProps({
   index: { type: Number, required: true },
   name: { type: String, required: true },
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['jump'])
-
 function step(delta) {
   model.value = Math.min(180, Math.max(0, model.value + delta))
-}
-
-function jump(angle) {
-  model.value = angle
-  emit('jump', angle)   // 按钮点击要立即发送，不走节流
 }
 </script>
 
 <template>
-  <div class="card">
-    <div class="head">
-      <span class="name">{{ name }}</span>
-      <span class="value">{{ model }}°</span>
-    </div>
+  <div class="row">
+    <span class="name">{{ name }}</span>
+
+    <button class="adj" :disabled="disabled" @click="step(-5)" title="减 5 度">−5</button>
+    <button class="adj" :disabled="disabled" @click="step(-1)" title="减 1 度">−1</button>
 
     <input
       class="slider"
@@ -42,67 +39,50 @@ function jump(angle) {
       @input="model = Number($event.target.value)"
     />
 
-    <div class="row">
-      <button v-for="a in [0, 45, 90, 135, 180]" :key="a"
-              :class="{ on: model === a }"
-              :disabled="disabled"
-              @click="jump(a)">{{ a }}°</button>
-    </div>
+    <button class="adj" :disabled="disabled" @click="step(1)" title="加 1 度">+1</button>
+    <button class="adj" :disabled="disabled" @click="step(5)" title="加 5 度">+5</button>
 
-    <div class="row fine">
-      <button :disabled="disabled" @click="step(-5)">-5</button>
-      <button :disabled="disabled" @click="step(-1)">-1</button>
-      <button :disabled="disabled" @click="step(1)">+1</button>
-      <button :disabled="disabled" @click="step(5)">+5</button>
-    </div>
+    <span class="value">{{ model }}°</span>
   </div>
 </template>
 
 <style scoped>
-.card {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin-bottom: 7px;
-}
-
-.head {
+.row {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 5px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .name {
-  font-size: 14px;
+  flex: 0 0 3.2em;
+  font-size: 12.5px;
   font-weight: 600;
-}
-
-.value {
-  font-size: 18px;
-  font-weight: 700;
-  color: #ffffff;
-  font-variant-numeric: tabular-nums;  /* 数字等宽，变化时不跳动 */
+  color: #e8e8e8;
 }
 
 .slider {
+  flex: 1;
+  min-width: 0;              /* 允许收缩，否则在小屏上会把整行撑破 */
   -webkit-appearance: none;
   appearance: none;
-  width: 100%;
-  height: 6px;
+  height: 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.16);
   outline: none;
-  margin-bottom: 7px;
+  cursor: pointer;
 }
 
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid #fff;
+  background: #fff;
+  border: 2px solid #000;
   cursor: pointer;
 }
 
@@ -110,42 +90,42 @@ function jump(angle) {
   opacity: 0.4;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
-}
-
-.row.fine {
-  grid-template-columns: repeat(4, 1fr);
-  margin-top: 5px;
-}
-
-button {
-  padding: 6px 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 7px;
+.adj {
+  flex: 0 0 auto;
+  width: 26px;
+  padding: 4px 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
-  color: #c8c8c8;
-  font-size: 11.5px;
+  color: #bbb;
+  font-size: 10.5px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.4);
+.adj:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
-button.on {
-  background: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-button:disabled {
-  opacity: 0.35;
+.adj:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
+}
+
+.value {
+  flex: 0 0 2.6em;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;   /* 数字等宽，变化时不跳动 */
+}
+
+/* 窄屏：微调按钮藏掉几个，优先保证滑块够宽 */
+@media (max-width: 380px) {
+  .name { flex-basis: 2.6em; font-size: 11.5px; }
+  .value { flex-basis: 2.2em; font-size: 12px; }
+  .adj { width: 22px; font-size: 10px; }
 }
 </style>
