@@ -156,3 +156,26 @@ a.userbar-login:hover {
   position: relative;
   z-index: 1;
 }
+
+/* ---------- 设备在线状态灯 ---------- */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #555;
+  vertical-align: middle;
+}
+
+.dot.ok {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, .8);
+}
+
+.dot.bad {
+  background: #555;
+}
+
+/* 离线时副标题压暗，但不用红色（保持黑白主题） */
+.subtitle.warn { color: #bbb; }

@@ -60,6 +60,33 @@ export function useArmControl(options = {}) {
     location.replace('/login?next=' + encodeURIComponent(location.pathname));
   }
 
+  // ---- 机械臂（ESP32）是否在线 ----
+  //
+  // 注意区分两个"在线"：
+  //   online       —— 浏览器能否连上**服务器**
+  //   deviceOnline —— ESP32 是否连上了**服务器**（决定指令发不发得出去）
+  const deviceOnline = ref(false)
+  const deviceSeconds = ref(0)
+
+  async function checkDevice() {
+    try {
+      const res = await fetch('/api/device')
+      const data = await res.json()
+      deviceOnline.value = data.online === true
+      deviceSeconds.value = data.onlineSeconds || 0
+    } catch {
+      deviceOnline.value = false
+    }
+  }
+
+  let deviceTimer = null
+
+  function startDevicePolling() {
+    checkDevice();
+    if (deviceTimer) clearInterval(deviceTimer)
+    deviceTimer = setInterval(checkDevice, 5000)   // 每 5 秒刷一次
+  }
+
   async function logout() {
     try { await fetch('/api/logout', { method: 'POST' }) } catch { /* 忽略 */ }
     location.href = '/';
@@ -164,6 +191,9 @@ export function useArmControl(options = {}) {
     checkAuth,
     goLogin,
     logout,
+    deviceOnline: readonly(deviceOnline),
+    deviceSeconds: readonly(deviceSeconds),
+    startDevicePolling,
     setAngle,
     setAngleNow,
     resetAll,

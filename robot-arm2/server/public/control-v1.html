@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>机械臂 · 旧版控制台</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* 版本切换 */
+  .verbar {
+    display: flex; gap: 8px; margin-bottom: 16px;
+  }
+  .verbar a {
+    flex: 1; text-align: center; padding: 10px;
+    border-radius: 10px; font-size: 13px; font-weight: 600;
+    text-decoration: none; transition: all .15s;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.04);
+    color: #8a8a8a;
+  }
+  .verbar a:hover { background: rgba(255,255,255,.1); color: #ccc; }
+  .verbar a.on {
+    background: rgba(255,255,255,.14);
+    color: #fff;
+    border-color: rgba(255,255,255,.4);
+  }
+
+  /* 说明条：这一代和现在那代的差别 */
+  .vintage-note {
+    background: rgba(255,255,255,.05);
+    border-left: 2px solid rgba(255,255,255,.3);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    color: #8a8a8a;
+    line-height: 1.8;
+    margin-bottom: 16px;
+  }
+  .vintage-note b { color: #ccc; font-weight: 600; }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">个人网站</a>
+  <div class="links">
+    <a href="/">首页</a>
+    <a href="/control/v2" class="on">机械臂</a>
+    <a href="/library/">图书管理</a>
+    <a href="/messages">留言板</a>
+  </div>
+</nav>
+
+<div class="container">
+  <!-- 版本切换：两代控制台 -->
+  <div class="verbar">
+    <a href="/control/v2">新版 · 6 轴总线舵机</a>
+    <a href="/control/v1" class="on">旧版 · 5 轴模拟舵机</a>
+  </div>
+
+  <div class="titlebar">
+    <div>
+      <h1>机械臂遥控 <span style="font-size:14px;color:#8a8a8a;font-weight:400">旧版</span></h1>
+      <p class="subtitle" id="status">
+        <span class="dot" id="dot"></span>
+        <span id="statustext">检查中…</span>
+      </p>
+    </div>
+    <div id="userbar"></div>
+  </div>
+
+  <div class="vintage-note">
+    <b>第一代控制台</b> —— 这是项目最初的样子：
+    MG996R 模拟舵机 + PCA9685 驱动板，5 个自由度，
+    原生 JavaScript 手写界面。<br>
+    和第二代（总线舵机、6 轴、Vue 3）相比，界面更朴素，但功能可用。
+  </div>
+
+  <div id="cards"></div>
+  <button class="btn" onclick="reset()">一键复位</button>
+  <div class="footer">第一代 · PCA9685 + 模拟舵机</div>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+// ---------------- 第一代的界面逻辑（原样保留）----------------
+const NAMES = ['底座', '大臂', '小臂', '手腕', '夹爪'];
+const N = 5;
+let last = [90, 90, 90, 90, 90];
+
+function card(i) {
+  return '<div class="c"><div class="h"><div class="n">' + NAMES[i] + '</div><div class="v" id="a' + i + '">90°</div></div>'
+    + '<input type="range" id="s' + i + '" min="0" max="180" value="90">'
+    + '<div class="p"><button onclick="go(' + i + ',0)">0°</button><button onclick="go(' + i + ',45)">45°</button><button onclick="go(' + i + ',90)" class="on">90°</button><button onclick="go(' + i + ',135)">135°</button><button onclick="go(' + i + ',180)">180°</button></div>'
+    + '<div class="f"><button onclick="adj(' + i + ',-5)">-5</button><button onclick="adj(' + i + ',-1)">-1</button><button onclick="adj(' + i + ',1)">+1</button><button onclick="adj(' + i + ',5)">+5</button></div></div>';
+}
+
+let html = '';
+for (let i = 0; i < N; i++) html += card(i);
+document.getElementById('cards').innerHTML = html;
+
+function send(i, a) {
+  if (a === last[i]) return;
+  last[i] = a;
+  fetch('/set?servo=' + i + '&angle=' + a)
+    .then(r => r.text())
+    .then(t => { document.getElementById('a' + i).textContent = t + '°'; })
+    .catch(() => { document.getElementById('statustext').textContent = '服务器无响应'; });
+}
+
+for (let i = 0; i < N; i++) {
+  const s = document.getElementById('s' + i);
+  s.addEventListener('input', () => { document.getElementById('a' + i).textContent = s.value + '°'; });
+  s.addEventListener('change', () => send(i, +s.value));
+}
+
+function go(i, a) {
+  document.getElementById('s' + i).value = a;
+  document.getElementById('a' + i).textContent = a + '°';
+  send(i, a);
+}
+function adj(i, d) {
+  const cur = parseInt(document.getElementById('a' + i).textContent);
+  go(i, Math.min(180, Math.max(0, cur + d)));
+}
+async function reset() {
+  for (let i = 0; i < N; i++) { go(i, 90); await new Promise(r => setTimeout(r, 150)); }
+}
+
+// ---------------- 状态灯 + 登录守卫 ----------------
+let me = null;
+
+async function refreshDevice() {
+  const r = await api('/api/device');
+  const dot = document.getElementById('dot');
+  const txt = document.getElementById('statustext');
+  if (r.ok && r.data.online) {
+    dot.className = 'dot ok';
+    const m = Math.floor(r.data.onlineSeconds / 60);
+    txt.textContent = '机械臂在线' + (m > 0 ? '（已连接 ' + m + ' 分钟）' : '');
+  } else {
+    dot.className = 'dot bad';
+    txt.textContent = '机械臂离线 —— 指令发不出去';
+  }
+}
+
+(async () => {
+  me = await requireLogin();
+  if (!me) return;
+  renderUserBar('userbar', me);
+  await refreshDevice();
+  setInterval(refreshDevice, 5000);   // 每 5 秒刷新一次状态
+})();
+</script>
+<script src="/starfield.js"></script>
+</body>
+</html>

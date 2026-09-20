@@ -12,7 +12,8 @@ const db = require('./db');
 const swaggerSpec = require('./swagger');
 const swaggerUi = require('swagger-ui-express');
 
-let esp32 = null; // 当前连进来的 ESP32（只存一台）
+let esp32 = null;         // 当前连进来的 ESP32（只存一台）
+let esp32Since = null;     // 它是什么时候连上的（用于展示在线时长）
 
 // 把 async 路由的错误统一接住，避免一个异常把整个进程带崩
 // （必须定义在这里 —— 下面的鉴权中间件也要用它）
@@ -311,6 +312,29 @@ app.get('/api/auth', wrap(async (req, res) => {
   res.json({ authed: !!account, account: account || null });
 }));
 
+/**
+ * @openapi
+ * /api/device:
+ *   get:
+ *     tags: [遥控]
+ *     summary: 机械臂是否在线
+ *     description: |
+ *       ESP32 是否已连上服务器。控制页顶部的状态灯用它。
+ *       这个接口不需要登录 —— 只是"在线/离线"一个比特，且首页也想展示。
+ *     responses:
+ *       200:
+ *         description: |
+ *           `{ online: true, since: "2026-09-20T..." }` 或 `{ online: false }`
+ */
+app.get('/api/device', (req, res) => {
+  if (!esp32) return res.json({ online: false });
+  res.json({
+    online: true,
+    since: new Date(esp32Since).toISOString(),
+    onlineSeconds: Math.floor((Date.now() - esp32Since) / 1000),
+  });
+});
+
 // ---------- 遥控命令：浏览器 -> ESP32 ----------
 /**
  * @openapi
@@ -558,6 +582,13 @@ app.delete('/api/messages/:id', requireAdmin, wrap(async (req, res) => {
 // ---------- 页面（无后缀 URL）----------
 // /control 是 Vue 3 单页应用，构建产物在 public/control/，
 // 由上面的 express.static 直接处理（访问 /control 会自动跳到 /control/）
+// 控制台两代版本
+//   /control     → 新版（Vue 3，6 轴总线舵机，构建产物在 public/control/）
+//   /control/v1  → 旧版（第一代：原生 JS，5 轴模拟舵机）
+//   /control/v2  → 跳到新版（让两边的切换按钮对称好写）
+app.get('/control/v1', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control-v1.html')));
+app.get('/control/v2', (req, res) => res.redirect('/control'));
+
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/messages', (req, res) => res.sendFile(path.join(__dirname, 'public', 'messages.html')));
@@ -596,11 +627,15 @@ wss.on('connection', (ws, req) => {
   console.log('✅ ESP32 认证通过');
   if (!esp32) {
     esp32 = ws;
+    esp32Since = Date.now();
     console.log('✅ 这是 ESP32，已登记');
     ws.on('message', (data) => console.log('ESP32 回报:', data.toString()));
     ws.on('close', () => {
-      if (esp32 === ws) esp32 = null;
-      console.log('ESP32 断开');
+      if (esp32 === ws) {
+        esp32 = null;
+        esp32Since = null;
+        console.log('ESP32 断开');
+      }
     });
   }
 });

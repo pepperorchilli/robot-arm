@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import ServoCard from './components/ServoCard.vue'
 import { useArmControl, SERVO_NAMES, PRESETS } from './composables/useArmControl.js'
 
@@ -14,16 +14,30 @@ const {
   checkAuth,
   goLogin,
   logout,
+  deviceOnline,
+  deviceSeconds,
+  startDevicePolling,
   setAngle,
   setAngleNow,
   resetAll,
   applyPreset,
 } = useArmControl()
 
+// 设备在线时长的可读形式
+const deviceUptime = computed(() => {
+  const s = deviceSeconds.value
+  if (!s) return ''
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分钟`
+  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`
+})
+
 onMounted(async () => {
   await checkAuth()
   // 未登录直接送去登录页，登录后会自动跳回来
   if (!authed.value) goLogin()
+  else startDevicePolling()
 })
 </script>
 
@@ -39,6 +53,12 @@ onMounted(async () => {
   </nav>
 
   <div class="container">
+    <!-- 两代控制台切换 -->
+    <div class="verbar">
+      <a href="/control" class="on">新版 · 6 轴总线舵机</a>
+      <a href="/control/v1">旧版 · 5 轴模拟舵机</a>
+    </div>
+
     <div class="titlebar">
       <h1>机械臂遥控</h1>
       <div v-if="account" class="userbar">
@@ -51,8 +71,18 @@ onMounted(async () => {
     <p v-if="checkingAuth" class="subtitle">正在检查登录状态…</p>
 
     <template v-else-if="authed">
-      <p class="subtitle" :class="{ warn: !online }">
-        <span class="dot" :class="online ? 'ok' : 'bad'"></span>
+      <!-- 设备在线状态灯：决定指令发不发得出去 -->
+      <p class="subtitle" :class="{ warn: !deviceOnline }">
+        <span class="dot" :class="deviceOnline ? 'ok' : 'bad'"></span>
+        <template v-if="deviceOnline">
+          机械臂在线<span v-if="deviceUptime">（已连接 {{ deviceUptime }}）</span>
+        </template>
+        <template v-else>
+          机械臂离线 —— 指令发不出去，请检查 ESP32 是否上电联网
+        </template>
+      </p>
+
+      <p class="subtitle">
         {{ status }}
       </p>
 
@@ -116,6 +146,38 @@ onMounted(async () => {
   max-width: 720px;
   margin: 0 auto;
   padding: 0 16px 40px;
+}
+
+/* 两代控制台切换 */
+.verbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.verbar a {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.15s;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #8a8a8a;
+}
+
+.verbar a:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+}
+
+.verbar a.on {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .titlebar {
