@@ -19,6 +19,20 @@ let esp32Since = null;     // 它是什么时候连上的（用于展示在线�
 // （必须定义在这里 —— 下面的鉴权中间件也要用它）
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// 全站安全响应头
+//
+// 这些头不改变功能，只是关掉浏览器的一些"方便但危险"的默认行为：
+//   nosniff        不让浏览器猜类型（防把上传内容当脚本执行）
+//   DENY           不许被别的站点嵌进 iframe（防点击劫持）
+//   no-referrer    跳转时不把本站地址带给第三方
+function securityHeaders(req, res, next) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-XSS-Protection', '0');   // 现代浏览器已废弃该头，显式关掉避免旧浏览器的错误过滤
+  next();
+}
+
 // ==================== 账号与鉴权 ====================
 //
 // 全站一套账号：访客注册后登录，凭会话 cookie 访问各功能。
@@ -81,13 +95,14 @@ setInterval(() => {
     .catch(e => console.error('清理会话失败:', e.message));
 }, 6 * 3600 * 1000);
 
-// ==================== 登录限流 ====================
+// ==================== 限流与防护 ====================
 //
-// 登录密码可能设得比较短，而接口暴露在公网 —— 没有限流的话，
-// 脚本每秒能试几千次，短密码几分钟就被爆破。
+// 三套独立的计数：
+//   1. 登录失败   同一 IP 10 分钟失败 5 次 → 封 15 分钟（防爆破）
+//   2. 注册       同一 IP 1 小时最多 5 个账号（防灌水）
+//   3. 全局请求   同一 IP 1 分钟最多 120 次（防扫描/刷接口）
 //
-// 策略：同一 IP 在 10 分钟内失败 5 次，封禁 15 分钟。
-// 存内存即可（重启清空，对个人站点够用）。
+// 都存内存，重启清空 —— 对个人站点够用。要更持久可以换 Redis。
 
 const loginAttempts = new Map();   // ip -> { count, firstAt, blockedUntil }
 const MAX_ATTEMPTS = 5;
@@ -131,23 +146,82 @@ function clearFailures(ip) {
   loginAttempts.delete(ip);
 }
 
-// 定期清理过期记录，避免内存无限增长
+// ---- 注册限流：同一 IP 1 小时最多注册 5 个账号 ----
+//
+// 注册接口原本完全没有限制，脚本可以每秒创几百个账号把库灌满。
+
+const registerAttempts = new Map();   // ip -> { count, windowStart }
+const REGISTER_PER_HOUR = 5;
+const REGISTER_WINDOW = 60 * 60 * 1000;
+
+function checkRegisterLimit(ip) {
+  const now = Date.now();
+  const rec = registerAttempts.get(ip);
+
+  if (!rec || now - rec.windowStart > REGISTER_WINDOW) {
+    registerAttempts.set(ip, { count: 0, windowStart: now });
+    return true;
+  }
+  return rec.count < REGISTER_PER_HOUR;
+}
+
+function recordRegister(ip) {
+  const rec = registerAttempts.get(ip);
+  if (rec) rec.count += 1;
+}
+
+// ---- 全局请求限流：同一 IP 1 分钟最多 120 次 ----
+//
+// 主要挡扫描器和暴力刷接口（登录限流只保护登录那一个接口）。
+
+const requestCounts = new Map();      // ip -> { count, windowStart }
+const REQUESTS_PER_MINUTE = 120;
+const REQUEST_WINDOW = 60 * 1000;
+
+function rateLimitMiddleware(req, res, next) {
+  const ip = clientIp(req);
+  const now = Date.now();
+  let rec = requestCounts.get(ip);
+
+  if (!rec || now - rec.windowStart > REQUEST_WINDOW) {
+    rec = { count: 0, windowStart: now };
+    requestCounts.set(ip, rec);
+  }
+  rec.count += 1;
+
+  if (rec.count > REQUESTS_PER_MINUTE) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+  next();
+}
+
+// 定期清理过期的限流记录，避免内存无限增长
 setInterval(() => {
   const now = Date.now();
+
   for (const [ip, rec] of loginAttempts) {
     const expired = now - rec.firstAt > ATTEMPT_WINDOW;
     const unblocked = !rec.blockedUntil || now > rec.blockedUntil;
     if (expired && unblocked) loginAttempts.delete(ip);
+  }
+  for (const [ip, rec] of registerAttempts) {
+    if (now - rec.windowStart > REGISTER_WINDOW) registerAttempts.delete(ip);
+  }
+  for (const [ip, rec] of requestCounts) {
+    if (now - rec.windowStart > REQUEST_WINDOW) requestCounts.delete(ip);
   }
 }, 5 * 60 * 1000);
 
 const app = express();
 
 // 前面挂着 Nginx，要信任 X-Forwarded-For 才能拿到真实客户端 IP
-// （登录限流依赖它，否则所有请求都会被算成同一个 IP）
+// （限流依赖它，否则所有请求都会被算成同一个 IP）
 app.set('trust proxy', true);
 
-app.use(express.json()); // 解析 POST 的 JSON body
+app.use(securityHeaders);      // 安全响应头
+app.use(rateLimitMiddleware);  // 全站请求限流
+app.use(express.json({ limit: '100kb' })); // 解析 POST 的 JSON body（限制体积，防超大请求打满内存）
 
 // ---------- API 文档 ----------
 // 在线可调试： http://localhost:3000/api-docs
@@ -201,8 +275,18 @@ app.use(express.static(path.join(__dirname, 'public')));
  *         description: 用户名已被占用
  */
 app.post('/api/register', wrap(async (req, res) => {
+  const ip = clientIp(req);
+
+  if (!checkRegisterLimit(ip)) {
+    return res.status(429).json({
+      error: `注册过于频繁，同一网络每小时最多注册 ${REGISTER_PER_HOUR} 个账号`,
+    });
+  }
+
   const { username, password, nickname } = req.body || {};
   const account = await accounts.register(username, password, nickname);
+  recordRegister(ip);
+
   const token = await accounts.createSession(account.id);
   res.setHeader('Set-Cookie',
     `${COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL / 1000}; HttpOnly; SameSite=Lax`);
