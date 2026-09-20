@@ -625,19 +625,30 @@ wss.on('connection', (ws, req) => {
     return;
   }
   console.log('✅ ESP32 认证通过');
-  if (!esp32) {
-    esp32 = ws;
-    esp32Since = Date.now();
-    console.log('✅ 这是 ESP32，已登记');
-    ws.on('message', (data) => console.log('ESP32 回报:', data.toString()));
-    ws.on('close', () => {
-      if (esp32 === ws) {
-        esp32 = null;
-        esp32Since = null;
-        console.log('ESP32 断开');
-      }
-    });
+
+  // 新连接直接顶掉旧的 —— 不要用 if (!esp32) 判断。
+  //
+  // 设备重连时，旧连接往往还没被 TCP 检测为断开，于是新连接会被忽略；
+  // 等旧连接随后真正关闭，esp32 被清空 —— 服务器以为设备离线，
+  // 实际上它正连着。用户看到的就是"聊着聊着突然断开"。
+  // （实际踩到：机械臂控制到一半，状态灯变灰，但设备其实还在线）
+  if (esp32 && esp32 !== ws) {
+    console.log('（旧的 ESP32 连接还在，用新连接替换）');
+    try { esp32.terminate(); } catch { /* 已经关了就忽略 */ }
   }
+
+  esp32 = ws;
+  esp32Since = Date.now();
+  console.log('✅ 这是 ESP32，已登记');
+
+  ws.on('message', (data) => console.log('ESP32 回报:', data.toString()));
+  ws.on('close', () => {
+    if (esp32 === ws) {
+      esp32 = null;
+      esp32Since = null;
+      console.log('ESP32 断开');
+    }
+  });
 });
 
 // ---------- 启动 ----------
