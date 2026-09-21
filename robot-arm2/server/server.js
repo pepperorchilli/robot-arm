@@ -751,8 +751,13 @@ wss.on('connection', (ws, req) => {
 db.check()
   .then(() => {
     console.log('✅ 数据库连接正常');
-    server.listen(config.PORT, () => {
-      console.log('服务器运行在 http://localhost:' + config.PORT);
+    // 只监听 127.0.0.1 —— 外部访问一律经 Nginx 转发。
+    //
+    // 默认的 listen(PORT) 会绑到所有网卡，意味着如果有人把云安全组的
+    // 3000 端口放开，就能绕过 Nginx 直连后端 —— 限流、安全响应头、
+    // 隐藏文件规则全部失效。绑本机是纵深防御的第二层。
+    server.listen(config.PORT, '127.0.0.1', () => {
+      console.log('服务器运行在 http://127.0.0.1:' + config.PORT + '（仅本机，外部经 Nginx）');
     });
   })
   .catch((err) => {
