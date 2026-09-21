@@ -170,15 +170,26 @@ function recordRegister(ip) {
   if (rec) rec.count += 1;
 }
 
-// ---- 全局请求限流：同一 IP 1 分钟最多 120 次 ----
+// ---- 全局请求限流 ----
 //
 // 主要挡扫描器和暴力刷接口（登录限流只保护登录那一个接口）。
+//
+// ⚠️ 两个坑（都实际踩过）：
+//   1. 阈值一开始设成 120/分钟，太严 —— 拖动滑块时前端每 60ms 发一次，
+//      拖十秒就是 160+ 个请求，正常操作反而被拦，控制直接失灵。
+//   2. /set 必须排除在全局限流之外，理由同上：它是"用起来就会高频"的接口，
+//      靠前端节流 + 登录鉴权约束即可，不该由全局限流管。
 
 const requestCounts = new Map();      // ip -> { count, windowStart }
-const REQUESTS_PER_MINUTE = 120;
+const REQUESTS_PER_MINUTE = 300;      // 5 次/秒，比正常浏览宽裕得多
 const REQUEST_WINDOW = 60 * 1000;
 
+// 不参与全局限流的路径
+const RATE_LIMIT_EXEMPT = new Set(['/set']);
+
 function rateLimitMiddleware(req, res, next) {
+  if (RATE_LIMIT_EXEMPT.has(req.path)) return next();
+
   const ip = clientIp(req);
   const now = Date.now();
   let rec = requestCounts.get(ip);
