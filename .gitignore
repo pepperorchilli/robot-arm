@@ -21,3 +21,13 @@ secrets.h
 能力目录.txt
 能力评估与补缺清单.md
 简历素材.md
+
+# 硬件资料里解压出来的 Python 虚拟环境（1591 个文件 / 27MB，纯垃圾）
+**/hardware/docs/_x/
+
+# 上游 SDK 压缩包（源码已解到 **/hardware/servo-tools/ 下，压缩包是冗余副本）
+**/hardware/docs/*.zip
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
