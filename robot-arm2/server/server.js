@@ -15,6 +15,82 @@ const swaggerUi = require('swagger-ui-express');
 let esp32 = null;         // 当前连进来的 ESP32（只存一台）
 let esp32Since = null;     // 它是什么时候连上的（用于展示在线时长）
 
+// ---------- 舵机遥测（力反馈）----------
+//
+// 背景：舵机一直在回传位置/负载/电压/温度/电流，但固件发回来之后
+// **只被 console.log 打印掉**，浏览器拿不到 —— 所以力反馈数据一直是
+// "日志里看得见、网页上用不上"。这里把它解析出来缓存住。
+//
+// 每条遥测只带一个关节：固件是轮询读的（读寄存器会阻塞，
+// 一口气读 6 个会把 WebSocket 心跳卡断），服务器负责拼成完整画面。
+const NUM_JOINTS = 6;
+const TELEMETRY_STALE_MS = 3000;   // 超过这么久没更新就当数据失效
+
+let telemetry = null;   // { updatedAt, joints: [6] }
+let events = [];        // 最近的事件（碰撞/过热/堵转/低电），最多留 50 条
+let torqueOn = true;    // 舵机是否还带着力（保护触发后会松力）
+
+function emptyJoints() {
+  return Array.from({ length: NUM_JOINTS }, () => ({
+    pos: null, deg: null, load: null, volt: null, temp: null, cur: null,
+  }));
+}
+
+/*
+ * 解析一条遥测：T:<关节>,<位置>,<负载>,<电压>,<温度>,<电流>
+ *
+ * 固件发的是**原始寄存器值**，换算一律在服务器做 ——
+ * 这样固件保持"哑"，单位换了不用重烧硬件。
+ */
+function handleTelemetry(body) {
+  const p = body.split(',');
+  if (p.length < 6) return false;
+
+  const i = Number(p[0]);
+  if (!Number.isInteger(i) || i < 0 || i >= NUM_JOINTS) return false;
+
+  const rawPos = Number(p[1]);
+  const rawLoad = Number(p[2]);
+
+  if (!telemetry) telemetry = { updatedAt: 0, joints: emptyJoints() };
+  telemetry.joints[i] = {
+    pos: rawPos,
+    deg: +((rawPos * 360) / 4096).toFixed(1),
+    load: {
+      // 负载寄存器：低 10 位是大小，bit 10(0x400) 是方向。
+      // ⚠️ 是 bit 10，不是最高位 —— 固件里踩过这个坑。
+      magnitude: rawLoad & 0x3FF,
+      percent: +((rawLoad & 0x3FF) / 10).toFixed(1),   // 1000 = 100% 额定扭矩
+      clockwise: !!(rawLoad & 0x400),
+    },
+    volt: +(Number(p[3]) / 10).toFixed(1),   // 寄存器单位 0.1V
+    temp: Number(p[4]),                      // 直接是摄氏度
+    cur: Math.round(Number(p[5]) * 6.5),     // 寄存器单位 6.5mA
+  };
+  telemetry.updatedAt = Date.now();
+  return true;
+}
+
+// 解析一条事件：E:<类型>,<关节>,<数值>
+function handleEvent(body) {
+  const p = body.split(',');
+  const ev = {
+    at: Date.now(),
+    type: p[0],
+    joint: p[1] !== undefined && p[1] !== '' ? Number(p[1]) : null,
+    value: p[2] !== undefined && p[2] !== '' ? Number(p[2]) : null,
+  };
+  events.push(ev);
+  if (events.length > 50) events.shift();
+
+  // 扭矩状态单独拎出来当"当前状态"存，不留在事件流里让前端去翻 ——
+  // 事件数组是有上限的，翻着翻着那条 torque 记录就被挤掉了，
+  // 前端会一直显示着过期的"已松力"。状态就该有状态的地方。
+  if (ev.type === 'torque' && ev.value !== null) torqueOn = ev.value === 1;
+
+  console.warn('⚠️ 设备事件:', JSON.stringify(ev));
+}
+
 // 把 async 路由的错误统一接住，避免一个异常把整个进程带崩
 // （必须定义在这里 —— 下面的鉴权中间件也要用它）
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -430,6 +506,41 @@ app.get('/api/device', (req, res) => {
   });
 });
 
+/**
+ * @openapi
+ * /api/telemetry:
+ *   get:
+ *     tags: [遥控]
+ *     summary: 读取舵机遥测（力反馈）
+ *     description: |
+ *       每个关节的位置、负载、电压、温度、电流。
+ *
+ *       数据由 ESP32 轮询上报（一次一个关节），服务器缓存最新值。
+ *       所以某个关节的 `pos` 为 null 表示"还没轮到它"，不是故障。
+ *
+ *       `available: false` 有三种情况：设备没连、还没收到过遥测、
+ *       或最后一条遥测超过 3 秒没更新（数据已失效）。
+ *     responses:
+ *       200:
+ *         description: |
+ *           `{ available: true, ageMs, joints: [...], events: [...] }`
+ *           或 `{ available: false, online: false }`
+ *       401:
+ *         description: 未登录
+ */
+app.get('/api/telemetry', requireAuth, (req, res) => {
+  if (!telemetry || Date.now() - telemetry.updatedAt > TELEMETRY_STALE_MS) {
+    return res.json({ available: false, online: !!esp32 });
+  }
+  res.json({
+    available: true,
+    ageMs: Date.now() - telemetry.updatedAt,
+    torqueOn,
+    joints: telemetry.joints,
+    events: events.slice(-10),
+  });
+});
+
 // ---------- 遥控命令：浏览器 -> ESP32 ----------
 /**
  * @openapi
@@ -736,11 +847,39 @@ wss.on('connection', (ws, req) => {
   esp32Since = Date.now();
   console.log('✅ 这是 ESP32，已登记');
 
-  ws.on('message', (data) => console.log('ESP32 回报:', data.toString()));
+  ws.on('message', (data) => {
+    const text = data.toString();
+
+    // 三种上报格式，靠前缀区分：
+    //   T:...  遥测（位置/负载/电压/温度/电流），一次一个关节
+    //   E:...  事件（碰撞/过温/堵转/低压）
+    //   0:90,1:90,...  到位回报（老格式，没前缀，保持原样）
+    //
+    // 单位换算全放在服务器做，固件只管把寄存器原始值丢上来 ——
+    // 固件是"哑"的，改显示不用重新烧录。
+    if (text.startsWith('T:')) {
+      if (!handleTelemetry(text.slice(2))) {
+        console.warn('⚠️ 遥测格式不对，已忽略:', text);
+      }
+      return;
+    }
+
+    if (text.startsWith('E:')) {
+      handleEvent(text.slice(2));
+      return;
+    }
+
+    console.log('ESP32 回报:', text);
+  });
+
   ws.on('close', () => {
     if (esp32 === ws) {
       esp32 = null;
       esp32Since = null;
+      // 设备走了，它最后那帧遥测也跟着失效 —— 否则仪表盘会一直显示
+      // 设备断电前的读数，看起来像"手臂还挂在半空"。宁可显示"不可用"。
+      telemetry = null;
+      torqueOn = true;   // 复位成默认值，不然重连后可能一直挂着"已松力"
       console.log('ESP32 断开');
     }
   });
@@ -756,8 +895,15 @@ db.check()
     // 默认的 listen(PORT) 会绑到所有网卡，意味着如果有人把云安全组的
     // 3000 端口放开，就能绕过 Nginx 直连后端 —— 限流、安全响应头、
     // 隐藏文件规则全部失效。绑本机是纵深防御的第二层。
-    server.listen(config.PORT, '127.0.0.1', () => {
-      console.log('服务器运行在 http://127.0.0.1:' + config.PORT + '（仅本机，外部经 Nginx）');
+    // 台面联调：ESP32 在局域网上，连不到 127.0.0.1，要临时放开：
+    //     BIND_HOST=0.0.0.0 npm start
+    // 默认仍然是 127.0.0.1，生产行为不变（部署时别设这个变量）。
+    const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
+
+    server.listen(config.PORT, BIND_HOST, () => {
+      console.log('服务器运行在 http://' + BIND_HOST + ':' + config.PORT +
+                  (BIND_HOST === '127.0.0.1' ? '（仅本机，外部经 Nginx）'
+                                              : '（⚠️ 已放开到局域网，仅限台面联调）'));
     });
   })
   .catch((err) => {
