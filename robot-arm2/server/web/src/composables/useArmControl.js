@@ -29,8 +29,12 @@ export function clamp(v) {
 export function useArmControl(options = {}) {
   const throttleMs = options.throttleMs ?? 60
 
-  // 5 个舵机的当前角度
-  const angles = reactive([90, 90, 90, 90, 90])
+  // 各舵机的当前角度。
+  // ⚠️ 长度必须跟着 SERVO_NAMES 走，不能写死。
+  //    这里原本写的是 [90,90,90,90,90]（5 个），而 SERVO_NAMES 有 6 个 ——
+  //    第 6 个（夹爪）读出来是 undefined，滑块是空的，
+  //    点 +5 会算出 NaN（undefined + 5）。用 length 生成就不会再漏。
+  const angles = reactive(Array(SERVO_NAMES.length).fill(90))
 
   const status = ref('就绪')
   const online = ref(true)   // 服务器/设备是否可用

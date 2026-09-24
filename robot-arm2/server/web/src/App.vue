@@ -1,7 +1,10 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import ServoCard from './components/ServoCard.vue'
+import ForceGauge from './components/ForceGauge.vue'
+import AlertStrip from './components/AlertStrip.vue'
 import { useArmControl, SERVO_NAMES, PRESETS } from './composables/useArmControl.js'
+import { useTelemetry } from './composables/useTelemetry.js'
 
 const {
   angles,
@@ -23,6 +26,19 @@ const {
   applyPreset,
 } = useArmControl()
 
+const {
+  joints,
+  available: telemAvailable,
+  alerts,
+  torqueOn,
+  packVolt,
+  maxTemp,
+  describe,
+  isSevere,
+  start: startTelemetry,
+  stop: stopTelemetry,
+} = useTelemetry()
+
 // 设备在线时长的可读形式
 const deviceUptime = computed(() => {
   const s = deviceSeconds.value
@@ -37,8 +53,14 @@ onMounted(async () => {
   await checkAuth()
   // 未登录直接送去登录页，登录后会自动跳回来
   if (!authed.value) goLogin()
-  else startDevicePolling()
+  else {
+    startDevicePolling()
+    startTelemetry()
+  }
 })
+
+// 离开页面就停掉轮询 —— 不然在后台还会一直打服务器
+onUnmounted(stopTelemetry)
 </script>
 
 <template>
@@ -98,6 +120,26 @@ onMounted(async () => {
       />
 
       <button class="reset" :disabled="sending" @click="resetAll(90)">全部回中</button>
+
+      <!-- 电源/保护状态：电压和峰值温度都在这里，一眼看全 -->
+      <p v-if="telemAvailable" class="powerline">
+        <span v-if="packVolt != null" :class="{ warnvolt: packVolt < 10.5 }">
+          电池 {{ packVolt }}V
+        </span>
+        <span v-if="maxTemp != null" :class="{ warntemp: maxTemp >= 65 }">
+          最高 {{ maxTemp }}°C
+        </span>
+      </p>
+
+      <!-- 保护触发后设备已经松力，控制条虽然还能拖但不会动。
+           不说清楚的话，用户只会以为"机械臂坏了" -->
+      <p v-if="!torqueOn" class="torquewarn">
+        ⚠️ 保护已触发，舵机已松力（过温或低压）。排除原因后重新上电恢复。
+      </p>
+
+      <AlertStrip :alerts="alerts" :describe="describe" :is-severe="isSevere" />
+
+      <ForceGauge :names="SERVO_NAMES" :joints="joints" :available="telemAvailable" />
 
       <div class="footer">Vue 3 + Vite · WebSocket 中转</div>
     </template>
@@ -326,5 +368,35 @@ button:disabled {
   font-size: 12px;
   color: #555555;
   margin-top: 24px;
+}
+
+/* 电池电压 / 峰值温度，压成一行放在控制区下面 */
+.powerline {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  font-size: 12px;
+  color: #8a8a8a;
+  margin: 10px 0 0;
+  font-variant-numeric: tabular-nums;   /* 数字等宽，刷新时不左右抖 */
+}
+
+/* 10.5V 是 3S 锂电该充电的线，65°C 是舵机开始明显发热的点。
+   到线了变黄，但不变红 —— 这是"注意"，真正触发保护会有 .torquewarn 那条 */
+.powerline .warnvolt,
+.powerline .warntemp {
+  color: #f5c451;
+}
+
+/* 保护触发后舵机已经松力，滑块还能拖但机械臂不会动。
+   不说清楚的话，用户只会以为"机械臂坏了" */
+.torquewarn {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: rgba(242, 112, 95, 0.12);
+  border-left: 3px solid #f2705f;
+  color: #ffd9d3;
 }
 </style>
