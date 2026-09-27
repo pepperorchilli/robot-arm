@@ -14,6 +14,10 @@
     uv run gesture_control.py --dry-run       # 只识别，不发命令（不接机械臂也能调）
     uv run gesture_control.py --camera 1      # 换一个摄像头
 
+控制接口要登录，用户名/密码这样给（详见 arm_client.py 开头的说明）：
+    ARM_USERNAME=qiudai ARM_PASSWORD=xxx uv run gesture_control.py
+    uv run gesture_control.py --username qiudai --password xxx
+
 快捷键：
     q 退出    m 切换模式    r 全部回中    d 开/关调试输出
 
@@ -24,10 +28,14 @@
 """
 
 import argparse
+import os
+import sys
 import time
 
 import cv2
 import mediapipe as mp
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from arm_client import ArmClient
 from gestures import classify, describe, fingers_up, palm_center
@@ -57,12 +65,92 @@ GESTURE_ACTIONS = {
 # ---------------------------------------------------------------
 # 画图辅助
 # ---------------------------------------------------------------
-def draw_text(frame, text, y, color=(255, 255, 255), scale=0.7):
-    """带黑色描边的文字，画面亮也能看清"""
-    cv2.putText(frame, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, scale,
-                (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(frame, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, scale,
-                color, 2, cv2.LINE_AA)
+# 两种模式的显示样式：横幅文字、底色(RGB)、一句话说明。
+# 指令模式用绿、跟随模式用蓝，做成整条横幅 —— 瞄一眼就知道现在是哪个。
+MODE_STYLE = {
+    True:  ("指令模式", (46, 160, 67), "手势触发固定姿态"),
+    False: ("跟随模式", (38, 108, 214), "手掌位置实时映射"),
+}
+
+# 中文字体：OpenCV 自带的 Hershey 字体只有 ASCII，cv2.putText 画「模式: 指令」
+# 出来是一串问号（每个 UTF-8 字节一个「?」）—— 整个叠加层以前都是乱码。
+# 所以中文一律用 PIL 渲染，再贴回画面上。
+_FONT_CANDIDATES = (
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+)
+_font_path = next((p for p in _FONT_CANDIDATES if os.path.exists(p)), None)
+
+_fonts = {}
+_text_cache = {}          # (文字, 字号, 颜色, x) → 渲染好的图块
+
+
+def _font(size):
+    if size not in _fonts:
+        if _font_path is None:
+            raise SystemExit("找不到中文字体，叠加层会是乱码。装一个思源黑体或改 _FONT_CANDIDATES。")
+        _fonts[size] = ImageFont.truetype(_font_path, size)
+    return _fonts[size]
+
+
+def draw_text(frame, text, y, color=(255, 255, 255), scale=0.7, x=12):
+    """
+    画一行带黑色描边的文字，y 是文字的**底边**。
+
+    color 按 RGB 给（PIL 的惯例），内部转成 BGR 再贴到画面上。
+    渲染结果按 (文字, 字号, 颜色, x) 缓存 —— 这几行字每帧长得一样，
+    没必要每帧重新排版一遍。
+    """
+    if not text:
+        return
+
+    size = max(12, int(round(30 * scale)))
+    key = (text, size, color, x)
+    patch = _text_cache.get(key)
+    if patch is None:
+        font = _font(size)
+        l, t, r, b = font.getbbox(text)
+        pad = 3                                  # 描边会往外扩，留点余量
+        img = Image.new("RGBA", ((r - l) + pad * 2, (b - t) + pad * 2), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        ox, oy = pad - l, pad - t
+        # 黑色描边：往 8 个方向各偏移一次。摄像头画面明暗不定，没描边会看不清。
+        for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)):
+            d.text((ox + dx, oy + dy), text, font=font, fill=(0, 0, 0, 255))
+        d.text((ox, oy), text, font=font, fill=color + (255,))
+
+        arr = np.array(img)
+        patch = (arr[:, :, 2::-1], arr[:, :, 3:4].astype(np.float32) / 255.0)
+        if len(_text_cache) > 300:               # 状态文字每帧都可能变，别无限涨
+            _text_cache.clear()
+        _text_cache[key] = patch
+
+    rgb, alpha = patch
+    h, w = rgb.shape[:2]
+    fh, fw = frame.shape[:2]
+
+    y0, x0 = int(y) - h, int(x)                  # y 是底边，往上推一个字高
+
+    # 出画的部分裁掉。不能直接切 frame —— 形状对不上会报错。
+    sx0, sy0 = max(0, -x0), max(0, -y0)
+    sx1 = w - max(0, (x0 + w) - fw)
+    sy1 = h - max(0, (y0 + h) - fh)
+    if sx0 >= sx1 or sy0 >= sy1:
+        return
+    x0, y0 = max(0, x0), max(0, y0)
+    rgb, alpha = rgb[sy0:sy1, sx0:sx1], alpha[sy0:sy1, sx0:sx1]
+
+    roi = frame[y0:y0 + rgb.shape[0], x0:x0 + rgb.shape[1]]
+    roi[:] = (roi * (1 - alpha) + rgb * alpha).astype(np.uint8)
+
+
+def draw_mode_banner(frame, use_command_mode, width):
+    """顶上的整条模式横幅。半米外也看得见现在是哪个模式。"""
+    label, color, hint = MODE_STYLE[use_command_mode]
+    cv2.rectangle(frame, (0, 0), (width, 54), color[::-1], -1)   # cv2 要 BGR
+    draw_text(frame, label, 41, (255, 255, 255), 1.1)
+    draw_text(frame, f"{hint}   ·   按 m 切换", 40, (232, 232, 232), 0.5, x=170)
 
 
 # ---------------------------------------------------------------
@@ -161,13 +249,24 @@ def main():
     parser.add_argument("--camera", type=int, default=0, help="摄像头编号（默认 0）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只识别手势，不发控制命令")
+    parser.add_argument("--username", default=None,
+                        help="登录用户名（也可用环境变量 ARM_USERNAME）")
     parser.add_argument("--password", default=None,
                         help="控制密码（也可用环境变量 ARM_PASSWORD）")
     parser.add_argument("--no-window", action="store_true",
                         help="不弹预览窗口（只打印识别结果）")
     args = parser.parse_args()
 
-    client = ArmClient(args.url, password=args.password)
+    # 输出改成行缓冲。
+    # 默认 Python 的 stdout 在重定向到文件/管道时是块缓冲（攒够 8KB 才落盘），
+    # 于是「登录失败」这种关键一行会一直卡在缓冲区里看不见，
+    # 看起来就像程序什么都没说 —— 排查时被这个坑过一次。
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:      # Python < 3.7
+        pass
+
+    client = ArmClient(args.url, username=args.username, password=args.password)
 
     if args.dry_run:
         print("[dry-run] 只识别，不发送控制命令")
@@ -177,10 +276,12 @@ def main():
     elif not client.login():
         # 服务器要求登录才能控制（防止陌生人乱动机械臂）
         print(f"⚠️  登录失败：{client.last_error}")
-        print("    控制接口需要密码，用 --password 参数或环境变量 ARM_PASSWORD 提供。")
-        print("    例如： ARM_PASSWORD=你的密码 uv run gesture_control.py")
+        print("    控制接口要「用户名 + 密码」两个都要，用参数或环境变量提供。")
+        print("    例如： ARM_USERNAME=qiudai ARM_PASSWORD=你的密码 uv run gesture_control.py")
+        print("    ⚠️ 识别照常能跑（画面上照样有骨架），但发出去的动作会被服务器拒绝，")
+        print("       表现就是「手势识别出来了，机械臂一动不动」。")
     else:
-        print(f"✅ 已连上服务器 {args.url} 并登录成功")
+        print(f"✅ 已连上服务器 {args.url} 并登录成功（{client.username}）")
 
     hands = build_hands()
 
@@ -199,6 +300,9 @@ def main():
 
     fingers = None
     status = "等待手势…"
+    last_send_error = None
+    fail_since = None       # 画面读不到的起始时刻（没断就是 None）
+    window_title = None     # 只在模式变化时才改标题，不用每帧都设
 
     print("\n快捷键：q 退出 | m 切换模式 | r 回中 | d 调试输出\n")
 
@@ -206,8 +310,22 @@ def main():
         while True:
             ok, frame = cap.read()
             if not ok:
-                print("读不到摄像头画面，退出")
-                break
+                # 偶发丢帧不该结束整场演示。
+                # macOS 上摄像头被别的 App（微信/腾讯会议）短暂抢走、或者切
+                # 输入源时会连续丢几帧，一读不到就退出太脆了。
+                # 连续 5 秒都拿不到才认定是真断了。
+                if fail_since is None:
+                    fail_since = time.monotonic()
+                    print("⚠️  读不到画面，重试中…")
+                elif time.monotonic() - fail_since > 5.0:
+                    print("读不到摄像头画面，退出（连续 5 秒没拿到帧）")
+                    break
+                time.sleep(0.03)        # 别空转把 CPU 占满
+                continue
+
+            if fail_since is not None:
+                print(f"→ 画面恢复（中断了 {time.monotonic() - fail_since:.1f} 秒）")
+                fail_since = None
 
             # 水平翻转成「照镜子」的效果，看着自然
             # （判定逻辑不用左右手信息，所以翻转不影响识别 —— 见 gestures.py）
@@ -226,6 +344,15 @@ def main():
             else:
                 status, fired = follow.update(landmarks)
 
+            # 发送失败必须看得见。
+            # 之前登录失败是完全静默的：画面照常画骨架、照常报手势，
+            # 但每个命令都被服务器拒掉 —— 现场看就是「识别明明没问题，机械臂就是不动」，
+            # 极难往鉴权上想。所以这里宁可吵一点。
+            if client.last_error != last_send_error:
+                last_send_error = client.last_error
+                if last_send_error:
+                    print(f"⚠️  发送失败：{last_send_error}（动作不会执行）")
+
             if fired and debug:
                 print(f"[{mode.name if use_command_mode else follow.name}] {status}")
 
@@ -235,13 +362,22 @@ def main():
                     mp.solutions.drawing_utils.draw_landmarks(
                         frame, hand, mp.solutions.hands.HAND_CONNECTIONS)
 
-                draw_text(frame, f"模式: {'指令' if use_command_mode else '跟随'}  (m 切换)",
-                          32, (0, 220, 255))
-                draw_text(frame, status, 66, (255, 255, 255))
+                draw_mode_banner(frame, use_command_mode, w)
+                draw_text(frame, status, 90, (255, 255, 255))
                 if fingers:
-                    draw_text(frame, f"手指: {describe(fingers)}", 100, (180, 255, 180), 0.6)
-                draw_text(frame, f"服务器: {args.url}", h - 16, (160, 160, 160), 0.5)
+                    draw_text(frame, f"手指: {describe(fingers)}", 124, (180, 255, 180), 0.6)
+                if client.last_error:
+                    draw_text(frame, "没登进服务器，动作不会执行", 158, (255, 90, 90), 0.6)
+                draw_text(frame, f"服务器: {args.url}", h - 16, (170, 170, 170), 0.5)
+
                 cv2.imshow("Gesture Control", frame)
+
+                # 标题栏也带上模式。窗口被别的窗口挡住、或者缩进 Dock 里时，
+                # 光靠画面上那条横幅看不见 —— 标题栏能兜住。
+                title = f"手势控制 — {MODE_STYLE[use_command_mode][0]}"
+                if title != window_title:
+                    window_title = title
+                    cv2.setWindowTitle("Gesture Control", title)
 
             # ---- 键盘 ----
             key = cv2.waitKey(1) & 0xFF

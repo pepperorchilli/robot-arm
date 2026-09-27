@@ -9,5 +9,6 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "mediapipe==0.10.21",
     "opencv-python>=4.9",
+    "pillow>=12.3.0",
     "requests>=2.31",
 ]

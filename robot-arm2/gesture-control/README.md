@@ -1,6 +1,6 @@
 # 手势控制机械臂
 
-用摄像头识别手势，实时控制 5 自由度机械臂。
+用摄像头识别手势，实时控制 6 自由度机械臂。
 
 ```
 摄像头 → MediaPipe 手部关键点 → 手势判定 → HTTP → Node 服务器 → WebSocket → ESP32 → 舵机
@@ -30,20 +30,25 @@ uv run gesture_control.py --camera 1             # 换摄像头
 uv run gesture_control.py --no-window            # 不弹预览窗
 ```
 
-### ⚠️ 控制需要密码
+### ⚠️ 控制需要登录（用户名 + 密码）
 
-服务器要求登录后才能控制机械臂（防止陌生人乱动）。密码用参数或环境变量提供：
+服务器要求登录后才能控制机械臂（防止陌生人乱动）。**两个字段都要给**：
 
 ```bash
 # 方式一：环境变量（推荐，不留在命令历史里）
-ARM_PASSWORD=你的密码 uv run gesture_control.py
+ARM_USERNAME=你的用户名 ARM_PASSWORD=你的密码 uv run gesture_control.py
 
 # 方式二：命令行参数
-uv run gesture_control.py --password 你的密码
+uv run gesture_control.py --username 你的用户名 --password 你的密码
 ```
 
-> 客户端会先用密码调 `/api/login` 换一个 token，之后所有 `/set` 请求自动带上。
+> 客户端先调 `/api/login` 换一个 token，之后所有 `/set` 请求自动带上。
 > token 过期时会自动重新登录，不用手动处理。
+>
+> **只给密码不给用户名会一律 401，而且报的是「用户名或密码不对」** ——
+> 服务端 `accounts.login(username, password)` 两个字段都要，缺用户名时
+> 拿 `undefined` 去查，结果就是「查无此人」，错误信息看不出缺的是哪个。
+> 症状很有迷惑性：画面照样有手骨架、照样报识别到的手势，机械臂就是不动。
 
 ### 快捷键
 
@@ -57,6 +62,9 @@ uv run gesture_control.py --password 你的密码
 ---
 
 ## 两种模式
+
+> **当前模式看窗口顶部那条横幅**：🟩 绿色 = 指令模式，🟦 蓝色 = 跟随模式，
+> 窗口标题栏也会跟着变（被挡住或缩进 Dock 里时看标题）。按 `m` 切换。
 
 ### 指令模式
 固定手势触发固定动作，手势需**连续稳定 5 帧**才触发（防止手在过渡姿势时乱动）：
@@ -98,7 +106,7 @@ uv run python -m unittest discover tests -v
 
 ---
 
-## 两个技术细节
+## 三个技术细节
 
 ### 1. 手指伸直的判定方法
 
@@ -131,6 +139,21 @@ Check failed: service_ Service is unavailable.
 
 > 依赖版本已写死在 `pyproject.toml`，`uv sync` 会自动装对，不用手动处理。
 
+### 3. 界面上的中文为什么不用 `cv2.putText`
+
+OpenCV 自带的 Hershey 字体**只有 ASCII**，`cv2.putText` 画中文会退化成问号——
+而且是**每个 UTF-8 字节一个**问号：
+
+```
+cv2.putText('模式: 指令  (m 切换)')   →   ??????: ??????  (m ??????)
+```
+
+叠加层整行都是中文，所以这个坑的后果是**整个界面没一个字能看**，
+偏偏程序本身运行完全正常，很容易以为是"识别没出来"。
+
+现在中文一律用 PIL + 系统中文字体（苹方）渲染成小图块，再按 alpha 贴回画面，
+并按「文字+字号+颜色」缓存——这几行字每帧都长一样，没必要每帧重排。
+
 ---
 
 ## 接到真实的机械臂
@@ -138,8 +161,10 @@ Check failed: service_ Service is unavailable.
 手势模块只依赖服务器的 `/set` 接口：
 
 ```
-GET /set?servo=<0-4>&angle=<0-180>
+GET /set?servo=<0-5>&angle=<0-180>
 ```
+
+（0=底座 1=肩 2=肘 3=腕俯仰 4=腕旋转 5=夹爪）
 
 1. 启动服务器：`cd ../server && npm start`
 2. 确认 ESP32 已连上（服务器日志会打印「ESP32 认证通过」）

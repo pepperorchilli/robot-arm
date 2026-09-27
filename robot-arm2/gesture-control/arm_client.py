@@ -6,9 +6,14 @@
 
 也就是说，手势识别只是「另一个客户端」，和网页遥控是平级的。
 
-鉴权：控制接口需要登录，所以本模块会先用密码换一个 token。
-      密码来源优先级：构造参数 > 环境变量 ARM_PASSWORD。
-      本地开发时可以直接 export ARM_PASSWORD=xxx，不用改代码。
+鉴权：控制接口需要登录，所以本模块会先用「用户名 + 密码」换一个 token。
+      用户名来源优先级：构造参数 > 环境变量 ARM_USERNAME。
+      密码来源优先级：  构造参数 > 环境变量 ARM_PASSWORD。
+      本地开发时可以直接 export，不用改代码。
+
+      ⚠️ 服务器的 /api/login 要的是 (username, password) 两个字段。
+         只发 password 会一律返回 401「用户名或密码错误」——
+         报的是密码错，真正缺的是用户名，很容易往错的方向查。
 """
 
 import os
@@ -28,9 +33,11 @@ ANGLE_MIN, ANGLE_MAX = 0, 180
 class ArmClient:
     """封装对机械臂服务器的调用"""
 
-    def __init__(self, base_url=DEFAULT_BASE_URL, timeout=2.0, password=None):
+    def __init__(self, base_url=DEFAULT_BASE_URL, timeout=2.0,
+                 username=None, password=None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.username = username or os.environ.get("ARM_USERNAME")
         self.password = password or os.environ.get("ARM_PASSWORD")
         self.token = None          # 登录后拿到的凭据
         self.last_error = None
@@ -38,9 +45,12 @@ class ArmClient:
     # ---------------- 鉴权 ----------------
 
     def login(self):
-        """用密码换 token。没配密码就跳过（服务器可能没开鉴权）"""
+        """用用户名 + 密码换 token"""
         if self.token:
             return True
+        if not self.username:
+            self.last_error = "未配置用户名（构造参数或环境变量 ARM_USERNAME）"
+            return False
         if not self.password:
             self.last_error = "未配置密码（构造参数或环境变量 ARM_PASSWORD）"
             return False
@@ -48,15 +58,22 @@ class ArmClient:
         try:
             resp = requests.post(
                 f"{self.base_url}/api/login",
-                json={"password": self.password},
+                # 两个字段都要带：服务端 accounts.login(username, password)
+                json={"username": self.username, "password": self.password},
                 timeout=self.timeout,
             )
         except requests.RequestException as e:
             self.last_error = str(e)
             return False
 
+        if resp.status_code == 429:
+            # 登录接口有防爆破限流：同一 IP 连错 5 次封 15 分钟。
+            # 被封期间连正确的密码也是 429，别误判成密码错。
+            self.last_error = f"登录被限流（{resp.text[:60]}）——等几分钟，或重启服务器"
+            return False
+
         if resp.status_code != 200:
-            self.last_error = "登录失败：密码错误" if resp.status_code == 401 else f"HTTP {resp.status_code}"
+            self.last_error = "用户名或密码不对" if resp.status_code == 401 else f"HTTP {resp.status_code}"
             return False
 
         # token 在 Set-Cookie 里
