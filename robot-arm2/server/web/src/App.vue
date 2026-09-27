@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import ServoCard from './components/ServoCard.vue'
 import ForceGauge from './components/ForceGauge.vue'
 import AlertStrip from './components/AlertStrip.vue'
@@ -24,6 +24,7 @@ const {
   setAngleNow,
   resetAll,
   applyPreset,
+  syncFromTelemetry,
 } = useArmControl()
 
 const {
@@ -38,6 +39,12 @@ const {
   start: startTelemetry,
   stop: stopTelemetry,
 } = useTelemetry()
+
+// 遥测每轮回来，把滑块同步到机械臂的真实位置。
+// 这样手势客户端（或另一个浏览器、或手直接掰）动了机械臂，网页上看得见 ——
+// 否则只有力反馈在跳，滑块纹丝不动，像坏了。
+// 自己刚下发指令的关节有 1.5 秒豁免期，见 useArmControl.syncFromTelemetry。
+watch(joints, (list) => syncFromTelemetry(list))
 
 // 设备在线时长的可读形式
 const deviceUptime = computed(() => {

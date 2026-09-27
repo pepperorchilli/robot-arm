@@ -101,7 +101,18 @@ export function useArmControl(options = {}) {
   const timers = new Array(SERVO_NAMES.length).fill(null)
   const pending = new Array(SERVO_NAMES.length).fill(null)
 
+  // 每个关节「最近一次本地下发指令」的时间戳，给遥测同步划豁免期用。
+  // 指令发出到舵机真转到位有延迟，这期间遥测报的还是旧位置，
+  // 不加豁免的话遥测会把你刚拖到的滑块拽回去 —— 手感变成打架。
+  const lastLocalAt = new Array(SERVO_NAMES.length).fill(0)
+  const SYNC_QUIET_MS = 1500
+
+  function markLocal(index) {
+    lastLocalAt[index] = Date.now()
+  }
+
   async function send(index, angle) {
+    markLocal(index)
     sending.value = true
     try {
       const res = await fetch(`/set?servo=${index}&angle=${angle}`)
@@ -138,6 +149,7 @@ export function useArmControl(options = {}) {
   function setAngle(index, angle) {
     const a = clamp(angle)
     angles[index] = a
+    markLocal(index)          // 手指刚碰过，豁免期立刻开始
 
     pending[index] = a
     if (timers[index]) return
@@ -155,6 +167,7 @@ export function useArmControl(options = {}) {
   function setAngleNow(index, angle) {
     const a = clamp(angle)
     angles[index] = a
+    markLocal(index)
     pending[index] = null
     if (timers[index]) {
       clearTimeout(timers[index])
@@ -184,8 +197,31 @@ export function useArmControl(options = {}) {
     status.value = `已应用「${preset.label}」`
   }
 
+  /**
+   * 把滑块同步到机械臂的**实际位置**（遥测读回来的角度）。
+   *
+   * 为什么需要这一步：滑块原先纯粹是「你想要的角度」，只有自己拖才会变。
+   * 于是别的控制源动机械臂时——手势客户端、另一个浏览器、手直接掰——
+   * 力反馈在跳、滑块却纹丝不动，看着像坏了。
+   *
+   * 用 deg 而不是 pos：pos 是舵机的原始寄存器值（0-4095），
+   * 直接塞进 0-180 的滑块会得到一个莫名其妙的角度。
+   */
+  function syncFromTelemetry(joints) {
+    if (!joints) return
+    const now = Date.now()
+    for (let i = 0; i < angles.length; i++) {
+      const j = joints[i]
+      if (!j || typeof j.deg !== 'number') continue      // 这一轮还没轮到它
+      if (now - lastLocalAt[i] < SYNC_QUIET_MS) continue // 刚下过指令，等舵机转到位
+      const a = clamp(j.deg)
+      if (angles[i] !== a) angles[i] = a
+    }
+  }
+
   return {
     angles,
+    syncFromTelemetry,
     status,
     online: readonly(online),
     sending: readonly(sending),
