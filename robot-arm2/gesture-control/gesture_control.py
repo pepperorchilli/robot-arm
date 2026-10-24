@@ -38,7 +38,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from arm_client import ArmClient
-from gestures import classify, describe, fingers_up, palm_center
+from gestures import classify_tolerant, describe, fingers_up, palm_center
 
 # ---------------------------------------------------------------
 # 常量
@@ -46,19 +46,27 @@ from gestures import classify, describe, fingers_up, palm_center
 # 手势被连续识别到多少帧才算「稳定」，防止手在过渡姿势时乱触发
 STABLE_FRAMES = 5
 
+# 画面连续读不到多久，才开始尝试「重开摄像头」。
+# 先等一会儿再动手：抖动通常几帧就过去了，为几帧抖动去 release/open 不值得。
+RETRY_BASE_S = 2.0
+
 # 指令模式：手势 → (说明, 动作)
 #   动作接收一个 ArmClient，想发什么就发什么
 #   索引对应 SO-ARM101 的 6 个关节：0底座 1肩 2肘 3腕俯仰 4腕旋转 5夹爪
 GRIPPER = 5   # 夹爪的舵机编号
 
+# 手势 → 动作。
+# 没有「数字4」：它和「张开」的关键点完全一样（都是四根手指伸直），
+# 拇指判定又不靠谱，所以放下姿态改挂在小指上。
 GESTURE_ACTIONS = {
     "张开":   ("夹爪张开", lambda c: c.set_servo(GRIPPER, 150)),
     "握拳":   ("夹爪闭合", lambda c: c.set_servo(GRIPPER, 30)),
     "数字1":  ("全部回中", lambda c: c.reset(90)),
     "剪刀手": ("预备姿态", lambda c: c.set_all([90, 120, 60, 90, 90, 150])),
     "数字3":  ("抓取姿态", lambda c: c.set_all([90, 135, 45, 90, 90, 150])),
-    "数字4":  ("放下姿态", lambda c: c.set_all([90, 60, 120, 90, 90, 150])),
-    "小指":   ("全部复位", lambda c: c.reset(90)),
+    "小指":   ("放下姿态", lambda c: c.set_all([90, 60, 120, 90, 90, 150])),
+    # 收拢：六个关节叠回最紧凑的 resting 姿态（实测峰值负载 ≤80）
+    "摇滚":   ("收拢姿态", lambda c: c.set_all([95, 0, 0, 0, 85, 39])),
 }
 
 
@@ -156,6 +164,26 @@ def draw_mode_banner(frame, use_command_mode, width):
 # ---------------------------------------------------------------
 # 模式处理
 # ---------------------------------------------------------------
+class DryRunClient:
+    """--dry-run 用的空客户端：接口照收，一个请求都不发。
+
+    以前 dry-run 只是跳过登录，动作代码照样调 set_servo()，结果被服务器
+    401 拒掉 —— 日志里一直刷「发送失败」，看起来像识别或网络坏了。
+    dry-run 的意义是「只调识别」，那就真的一个包都别发。
+    """
+
+    last_error = None
+
+    def set_servo(self, index, angle):
+        return True
+
+    def set_all(self, angles):
+        return True
+
+    def reset(self, angle=90):
+        return True
+
+
 class CommandMode:
     """指令模式：稳定手势 → 触发一次动作"""
 
@@ -242,6 +270,18 @@ def build_hands():
     )
 
 
+def open_camera(index):
+    """打开摄像头。打不开返回 None（不抛异常，调用方决定怎么处理）。
+
+    抽成函数是因为要开两次：启动时一次，跑挂了重连时又一次。
+    """
+    cap = cv2.VideoCapture(index)
+    if not cap.isOpened():
+        cap.release()
+        return None
+    return cap
+
+
 def main():
     parser = argparse.ArgumentParser(description="手势控制机械臂")
     parser.add_argument("--url", default="http://localhost:3000",
@@ -253,6 +293,8 @@ def main():
                         help="登录用户名（也可用环境变量 ARM_USERNAME）")
     parser.add_argument("--password", default=None,
                         help="控制密码（也可用环境变量 ARM_PASSWORD）")
+    parser.add_argument("--token", default=None,
+                        help="已有的会话 token，跳过登录（也可用环境变量 ARM_TOKEN）")
     parser.add_argument("--no-window", action="store_true",
                         help="不弹预览窗口（只打印识别结果）")
     args = parser.parse_args()
@@ -266,10 +308,12 @@ def main():
     except AttributeError:      # Python < 3.7
         pass
 
-    client = ArmClient(args.url, username=args.username, password=args.password)
+    client = ArmClient(args.url, username=args.username, password=args.password,
+                       token=args.token)
 
     if args.dry_run:
         print("[dry-run] 只识别，不发送控制命令")
+        client = DryRunClient()
     elif not client.ping():
         print(f"⚠️  连不上服务器 {args.url}：{client.last_error}")
         print("    机械臂不会动。可以先开服务器，或用 --dry-run 只调识别。")
@@ -285,8 +329,10 @@ def main():
 
     hands = build_hands()
 
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
+    # 启动时打不开就直接报错退出（附排查提示）——这时候还没进入演示，
+    # 静默重试只会让人一直等。运行中掉线才走下面的自动重连。
+    cap = open_camera(args.camera)
+    if cap is None:
         raise SystemExit(
             f"打不开摄像头 {args.camera}。\n"
             "  1) 检查系统设置 → 隐私与安全性 → 摄像头，允许终端访问\n"
@@ -303,34 +349,74 @@ def main():
     last_send_error = None
     fail_since = None       # 画面读不到的起始时刻（没断就是 None）
     window_title = None     # 只在模式变化时才改标题，不用每帧都设
+    last_frame = None       # 最后一帧好画面，重连期间拿它当底图，别让窗口变黑
+    last_try_at = 0.0       # 上次尝试重开摄像头的时刻
+    reopen_attempts = 0     # 本轮掉线重开失败了几次（用来把重试间隔逐次拉长）
 
     print("\n快捷键：q 退出 | m 切换模式 | r 回中 | d 调试输出\n")
 
     try:
         while True:
-            ok, frame = cap.read()
+            ok, frame = cap.read() if cap is not None else (False, None)
+
             if not ok:
                 # 偶发丢帧不该结束整场演示。
                 # macOS 上摄像头被别的 App（微信/腾讯会议）短暂抢走、或者切
                 # 输入源时会连续丢几帧，一读不到就退出太脆了。
-                # 连续 5 秒都拿不到才认定是真断了。
                 if fail_since is None:
                     fail_since = time.monotonic()
-                    print("⚠️  读不到画面，重试中…")
-                elif time.monotonic() - fail_since > 5.0:
-                    print("读不到摄像头画面，退出（连续 5 秒没拿到帧）")
+                    last_try_at = fail_since
+                    print("⚠️  读不到画面，准备重连…")
+
+                down_for = time.monotonic() - fail_since
+
+                # 光等是等不回来的：摄像头被别人抢走之后，句柄不会自己恢复，
+                # 必须 release 掉再重新 open。原来这里只是死等 5 秒然后退出 ——
+                # 一个几帧的抖动就能结束整场演示，已经因此挂掉过三次。
+                # 重试间隔逐次拉长（2s → 4s → 5s 封顶），免得把日志刷爆。
+                if time.monotonic() - last_try_at > min(RETRY_BASE_S * (reopen_attempts + 1), 5.0):
+                    last_try_at = time.monotonic()
+                    reopen_attempts += 1
+                    if cap is not None:
+                        cap.release()
+                        cap = None
+                    time.sleep(0.3)     # 给系统一点时间把设备放出来
+                    cap = open_camera(args.camera)
+                    if cap is None:
+                        print(f"⚠️  重开摄像头失败（第 {reopen_attempts} 次，已中断 {down_for:.0f} 秒）")
+                    # open 拿回句柄 ≠ 一定能出图：isOpened() 只说明设备被占用上了，
+                    # 不管它后面给不给帧。所以这里**不报「已重连」**，等真的读到一帧
+                    # 再报（就是下面那条「画面恢复」）。否则会一边喊着重连成功、
+                    # 一边继续重连，日志骗人。
+
+                # --no-window 没有「按 q 退出」这条路，别在这儿无限空转
+                if args.no_window and down_for > 30.0:
+                    print("摄像头连续 30 秒没恢复，退出")
                     break
-                time.sleep(0.03)        # 别空转把 CPU 占满
+
+                # 重连期间窗口不能死：macOS 上不调 waitKey 窗口就不处理事件，会直接转菊花。
+                # 所以照常画一帧、照常收按键。
+                if not args.no_window:
+                    frame = last_frame.copy() if last_frame is not None \
+                        else np.zeros((480, 640, 3), np.uint8)
+                    draw_text(frame, "摄像头重连中…", 90, (255, 200, 90), 0.8)
+                    cv2.imshow("Gesture Control", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+                time.sleep(0.05)        # 别空转把 CPU 占满
                 continue
 
             if fail_since is not None:
                 print(f"→ 画面恢复（中断了 {time.monotonic() - fail_since:.1f} 秒）")
                 fail_since = None
+            reopen_attempts = 0
 
             # 水平翻转成「照镜子」的效果，看着自然
             # （判定逻辑不用左右手信息，所以翻转不影响识别 —— 见 gestures.py）
             frame = cv2.flip(frame, 1)
             h, w = frame.shape[:2]
+            # 留一份底图给重连用（draw_text 会就地改 frame，所以要 copy）
+            last_frame = frame.copy()
 
             results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             hand = results.multi_hand_landmarks[0] if results.multi_hand_landmarks else None
@@ -339,7 +425,7 @@ def main():
 
             # ---- 按模式处理 ----
             if use_command_mode:
-                gesture = classify(fingers, with_thumb=True) if fingers else None
+                gesture = classify_tolerant(fingers) if fingers else None
                 status, fired = mode.update(gesture)
             else:
                 status, fired = follow.update(landmarks)
@@ -397,7 +483,8 @@ def main():
     except KeyboardInterrupt:
         print("\n中断退出")
     finally:
-        cap.release()
+        if cap is not None:     # 重连失败时 cap 会是 None
+            cap.release()
         if not args.no_window:
             cv2.destroyAllWindows()
         hands.close()

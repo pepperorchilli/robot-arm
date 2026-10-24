@@ -34,12 +34,14 @@ class ArmClient:
     """封装对机械臂服务器的调用"""
 
     def __init__(self, base_url=DEFAULT_BASE_URL, timeout=2.0,
-                 username=None, password=None):
+                 username=None, password=None, token=None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.username = username or os.environ.get("ARM_USERNAME")
         self.password = password or os.environ.get("ARM_PASSWORD")
-        self.token = None          # 登录后拿到的凭据
+        # 已有的会话 token（--token 或 ARM_TOKEN）：给了它就不再登录。
+        # 台面联调时用 —— 不必把密码写进命令历史。
+        self.token = token or os.environ.get("ARM_TOKEN")
         self.last_error = None
 
     # ---------------- 鉴权 ----------------

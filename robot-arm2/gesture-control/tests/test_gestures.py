@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gestures import (  # noqa: E402
     INDEX_PIP, INDEX_TIP, MIDDLE_PIP, MIDDLE_TIP, MIDDLE_MCP,
     PINKY_PIP, PINKY_TIP, RING_PIP, RING_TIP, THUMB_IP, THUMB_TIP, WRIST,
-    classify, describe, fingers_up, hand_scale, palm_center,
+    classify, classify_tolerant, describe, fingers_up, hand_scale, palm_center,
 )
 
 
@@ -107,6 +107,47 @@ class TestClassify(unittest.TestCase):
     def test_unknown_returns_none(self):
         """食指+无名指伸直，不是合法手势"""
         self.assertIsNone(classify([False, True, False, True, False]))
+
+
+class TestClassifyTolerant(unittest.TestCase):
+    """摄像头用的判定：拇指完全不参与。
+
+    现场事故：原来要求五指精确匹配，拇指一被判成伸直，
+    剪刀手/数字3/数字4 全部返回 None；握拳则变成点赞。
+    """
+
+    def test_thumb_misread_scissors(self):
+        self.assertEqual(classify_tolerant([True, True, True, False, False]), "剪刀手")
+
+    def test_thumb_misread_three(self):
+        self.assertEqual(classify_tolerant([True, True, True, True, False]), "数字3")
+
+    def test_thumb_does_not_turn_fist_into_thumbs_up(self):
+        """握拳时拇指被误判成伸直，结果必须还是握拳（以前是点赞）"""
+        self.assertEqual(classify_tolerant([True, False, False, False, False]), "握拳")
+
+    def test_four_fingers_is_open_palm(self):
+        """四指伸直（拇指随意）= 张开；没有数字4 这个手势了"""
+        self.assertEqual(classify_tolerant([False, True, True, True, True]), "张开")
+        self.assertEqual(classify_tolerant([True] * 5), "张开")
+
+    def test_fist_still_works(self):
+        self.assertEqual(classify_tolerant([False] * 5), "握拳")
+
+    def test_pinky_only(self):
+        self.assertEqual(classify_tolerant([False, False, False, False, True]), "小指")
+        # 拇指误判也不影响
+        self.assertEqual(classify_tolerant([True, False, False, False, True]), "小指")
+
+    def test_rock_sign(self):
+        """食指 + 小指 = 摇滚 / 收拢；拇指误判不影响"""
+        self.assertEqual(classify_tolerant([False, True, False, False, True]), "摇滚")
+        self.assertEqual(classify_tolerant([True, True, False, False, True]), "摇滚")
+
+    def test_unknown_still_none(self):
+        """其它不连续的伸法不算数，不能被硬套成数字"""
+        self.assertIsNone(classify_tolerant([False, True, False, True, False]))
+        self.assertIsNone(classify_tolerant([False, False, True, False, True]))
 
 
 class TestDescribe(unittest.TestCase):

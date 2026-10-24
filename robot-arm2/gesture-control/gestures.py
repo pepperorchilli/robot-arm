@@ -132,6 +132,51 @@ def classify(fingers, with_thumb=False):
     return None
 
 
+# 不含拇指的四根手指，伸直的数量 → 手势名。
+# 为什么干脆不看拇指：实测握拳时拇指会被判成"伸直"（变成点赞），
+# 比数字4 时也会（变成张开）。拇指的几何和其它四指不一样，
+# 「指尖比指节离掌心远」这条规则对它本来就不成立。
+# 与其调阈值拿现场当试验场，不如让它彻底不参与判定。
+_FOUR_FINGER_NAMES = {
+    0: "握拳",
+    1: "数字1",
+    2: "剪刀手",
+    3: "数字3",
+    4: "张开",
+}
+
+
+def classify_tolerant(fingers):
+    """摄像头用的手势判定：只数食指~小指，拇指不参与。
+
+    0/1/2/3/4 根伸直 → 握拳 / 数字1 / 剪刀手 / 数字3 / 张开。
+    小指单独伸开算一个独立手势（否则它会被数成「数字1」）。
+
+    ⚠️ 「数字4」和「张开」在关键点上没有区别（都是四根手指伸直），
+       所以没有数字4 这个手势了；原来绑在它上面的动作改挂在小指上。
+    """
+    pattern = tuple(bool(f) for f in fingers)
+
+    # 小指单独伸开：其余四根收着。必须排在「数数量」之前，
+    # 否则会被当成数字1。
+    if pattern[1:] == (False, False, False, True):
+        return "小指"
+
+    # 食指 + 小指（摇滚手势）：连续伸法已经全被占满了，
+    # 只有不连续组合还能再加一个不冲突的手势。这个姿势好摆、四根手指
+    # 各自的方向差别大，距离判定不容易混。
+    if pattern[1:] == (True, False, False, True):
+        return "摇滚"
+
+    tail = pattern[1:]
+    count = sum(tail)
+    # 必须是「连续从食指开始伸直」才算数：
+    # 食指+无名指这种乱伸法不是合法手势，不能数成 2。
+    if tail == tuple([True] * count + [False] * (4 - count)):
+        return _FOUR_FINGER_NAMES[count]
+    return None
+
+
 def describe(fingers):
     """给调试/界面用：把伸展状态说成人话，如「食指+中指」"""
     up = [FINGER_NAMES[i] for i, f in enumerate(fingers) if f]
