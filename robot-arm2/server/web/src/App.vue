@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import ServoCard from './components/ServoCard.vue'
+import GripPanel from './components/GripPanel.vue'
 import ForceGauge from './components/ForceGauge.vue'
 import AlertStrip from './components/AlertStrip.vue'
 import { useArmControl, SERVO_NAMES, PRESETS } from './composables/useArmControl.js'
@@ -25,6 +26,9 @@ const {
   resetAll,
   applyPreset,
   syncFromTelemetry,
+  grip,
+  gripping,
+  gripStep,
 } = useArmControl()
 
 const {
@@ -128,6 +132,19 @@ onUnmounted(stopTelemetry)
 
       <button class="reset" :disabled="sending" @click="resetAll(90)">全部回中</button>
 
+      <!-- 夹爪夹持：加力 / 退档 / 松力。
+           夹住东西以后滑块就没意义了（被物体挡着，拖到哪儿都到不了），
+           所以单开一块，只看"实际角度"和"夹持力"两个量。 -->
+      <GripPanel
+        :joint="joints[5]"
+        :available="telemAvailable"
+        :disabled="sending || !torqueOn"
+        :active="gripping"
+        :step="gripStep"
+        @force="grip"
+        @release="grip(0)"
+      />
+
       <!-- 电源/保护状态：电压和峰值温度都在这里，一眼看全 -->
       <p v-if="telemAvailable" class="powerline">
         <span v-if="packVolt != null" :class="{ warnvolt: packVolt < 10.5 }">
@@ -141,7 +158,7 @@ onUnmounted(stopTelemetry)
       <!-- 保护触发后设备已经松力，控制条虽然还能拖但不会动。
            不说清楚的话，用户只会以为"机械臂坏了" -->
       <p v-if="!torqueOn" class="torquewarn">
-        ⚠️ 保护已触发，舵机已松力（过温或低压）。排除原因后重新上电恢复。
+        ⚠️ 保护已触发，舵机已松力（过温 / 低压 / 堵转）。排除原因后重新上电恢复。
       </p>
 
       <AlertStrip :alerts="alerts" :describe="describe" :is-severe="isSevere" />

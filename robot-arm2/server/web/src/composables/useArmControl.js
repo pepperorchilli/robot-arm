@@ -176,6 +176,51 @@ export function useArmControl(options = {}) {
     return send(index, a)
   }
 
+  // ---- 夹爪夹持（加力）----
+  //
+  // 和 setAngle 的关键区别：这里**不动 angles[5]**。
+  //   为什么：角度滑块代表"机械臂实际在哪儿"。夹住东西以后，
+  //   命令值会一直往闭合方向走，但手指被物体挡住、实际位置不变。
+  //   如果这里也去改 angles[5]，界面就会显示一个根本没到过的角度。
+  //   所以命令只发给固件，显示交给遥测同步 ——
+  //   实际角度变了就变，没变就没变。
+  const gripping = ref(false)
+  const gripStep = ref(0)     // 已经加了几档（仅用于显示）
+
+  async function grip(step = 1) {
+    const s = Math.max(-20, Math.min(20, Math.round(step)))
+    try {
+      const res = await fetch(`/api/grip?step=${s}`)
+
+      if (res.status === 401) {
+        status.value = '登录已过期，正在跳转到登录页…'
+        goLogin()
+        return false
+      }
+      if (!res.ok) {
+        online.value = false
+        status.value = '设备未连接'
+        return false
+      }
+
+      online.value = true
+      if (s === 0) {
+        gripping.value = false
+        gripStep.value = 0
+        status.value = '夹爪松力'
+      } else {
+        gripping.value = true
+        gripStep.value = Math.max(0, gripStep.value + s)
+        status.value = `夹爪${s > 0 ? '加力' : '退档'} · ${gripStep.value} 档`
+      }
+      return true
+    } catch {
+      online.value = false
+      status.value = '服务器无响应'
+      return false
+    }
+  }
+
   /** 全部复位到指定角度 */
   async function resetAll(angle = 90) {
     for (let i = 0; i < SERVO_NAMES.length; i++) {
@@ -204,17 +249,20 @@ export function useArmControl(options = {}) {
    * 于是别的控制源动机械臂时——手势客户端、另一个浏览器、手直接掰——
    * 力反馈在跳、滑块却纹丝不动，看着像坏了。
    *
-   * 用 deg 而不是 pos：pos 是舵机的原始寄存器值（0-4095），
-   * 直接塞进 0-180 的滑块会得到一个莫名其妙的角度。
+   * 用 angle 而不是 pos / deg：
+   *   pos 是原始寄存器值（0-4095），塞进 0-180 的滑块没意义；
+   *   deg 是舵机轴角（raw×360/4096），只在「六个关节行程一样」时才等于滑块角度 ——
+   *   这台机器的舵盘是任意角度装的，每个关节行程不同（114°~228°），
+   *   所以服务器用 JOINT_RAW_MIN/MAX 逐关节换算好 angle 再发过来。
    */
   function syncFromTelemetry(joints) {
     if (!joints) return
     const now = Date.now()
     for (let i = 0; i < angles.length; i++) {
       const j = joints[i]
-      if (!j || typeof j.deg !== 'number') continue      // 这一轮还没轮到它
+      if (!j || typeof j.angle !== 'number') continue    // 这一轮还没轮到它
       if (now - lastLocalAt[i] < SYNC_QUIET_MS) continue // 刚下过指令，等舵机转到位
-      const a = clamp(j.deg)
+      const a = clamp(j.angle)
       if (angles[i] !== a) angles[i] = a
     }
   }
@@ -238,5 +286,8 @@ export function useArmControl(options = {}) {
     setAngleNow,
     resetAll,
     applyPreset,
+    grip,
+    gripping: readonly(gripping),
+    gripStep: readonly(gripStep),
   }
 }

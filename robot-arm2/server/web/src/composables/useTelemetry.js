@@ -19,7 +19,10 @@ const POLL_MS = 500
 export function useTelemetry(options = {}) {
   const pollMs = options.pollMs ?? POLL_MS
 
-  // 每个关节：{ pos, deg, load: {magnitude, percent, clockwise}, volt, temp, cur }
+  // 每个关节：{ pos, deg, angle, load: {magnitude, percent, clockwise}, volt, temp, cur }
+  //   pos   = 原始寄存器值 (0-4095)
+  //   deg   = 舵机轴角 (raw×360/4096)，只用于显示
+  //   angle = 网页滑块角度 (0-180)，逐关节按实测行程换算，控制/同步都用它
   // 没数据的关节保持 null，别填 0 —— 0% 负载和"不知道"是两回事。
   const joints = ref(Array(SERVO_NAMES.length).fill(null))
 
@@ -87,7 +90,14 @@ export function useTelemetry(options = {}) {
     overtemp: (e) => `过温：${SERVO_NAMES[e.joint] ?? '关节' + e.joint} ${e.value}°C，已松力`,
     overtemp_warn: (e) => `温度偏高：${SERVO_NAMES[e.joint] ?? '关节' + e.joint} ${e.value}°C`,
     lowbat: (e) => `电压低：${(e.value / 10).toFixed(1)}V，请充电`,
-    stall: (e) => `堵转：${SERVO_NAMES[e.joint] ?? '关节' + e.joint}`,
+    // 堵转：固件把目标钉在当前实际位置，手臂停住不再使劲。
+    // 挡着的东西挪开不会自己恢复，要重新下指令。
+    stall: (e) => `堵转：${SERVO_NAMES[e.joint] ?? '关节' + e.joint} 负载 ${((e.value ?? 0) / 10).toFixed(0)}%，已停在原地`,
+    // 持续高负载，只是提醒 —— 正常托举也可能到这个值，手臂不动
+    loadwarn: (e) => `${SERVO_NAMES[e.joint] ?? '关节' + e.joint} 持续高负载 ${((e.value ?? 0) / 10).toFixed(0)}%（已 10 秒）`,
+    // 夹持加力到了负载上限 —— 不是故障，是"再按也不加了"的提示
+    griplimit: (e) => `夹持到顶：负载 ${((e.value ?? 0) / 10).toFixed(0)}%，不再加力`,
+    gripfail: () => '夹持失败：读不到夹爪当前位置',
   }
 
   function describe(e) {
@@ -97,7 +107,12 @@ export function useTelemetry(options = {}) {
 
   /** 事件是否算"警报"（红色），还是只是提示 */
   function isSevere(e) {
-    return e.type === 'collision' || e.type === 'overtemp' || e.type === 'lowbat' || e.type === 'stall'
+    return (
+      e.type === 'collision' ||
+      e.type === 'overtemp' ||
+      e.type === 'lowbat' ||
+      e.type === 'stall'
+    )
   }
 
   return {

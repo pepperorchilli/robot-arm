@@ -26,13 +26,52 @@ let esp32Since = null;     // 它是什么时候连上的（用于展示在线�
 const NUM_JOINTS = 6;
 const TELEMETRY_STALE_MS = 3000;   // 超过这么久没更新就当数据失效
 
+/*
+ * 每个关节实测的机械行程（raw 位置，0~4095）。
+ *
+ * ⚠️ 必须和 arm-cloud-bus/arm-cloud-bus.ino 里的 RAW_MIN / RAW_MAX 保持一致。
+ * 两边不一致的症状很难看：舵机动了，但网页滑块停在别处（或者反着走）。
+ *
+ * 为什么不能像以前那样用 raw × 360 / 4096：
+ * 那假设了六个关节的机械行程都是全量程、且中点固定在 raw 2048。
+ * 这台机器的舵盘是任意角度装的，每个关节的行程都不一样（114°~228°），
+ * 固件里已经改成逐关节映射，这里必须跟着改。
+ *
+ * 顺序：底座 → 肩 → 肘 → 腕俯仰 → 腕旋转 → 夹爪
+ */
+// ⚠️ 滑块 0 = 机械臂收拢的那一端。肘部（下标 2）收拢时 raw **大**，
+//    所以它这组是倒着写的（MIN > MAX）—— 不要按 lo < hi 去假设。
+//    改这里必须同步改固件 arm-cloud-bus.ino 里的 RAW_MIN/RAW_MAX，否则
+//    网页显示和实际位置会对不上。
+// 夹爪（下标 5）闭合端不留余量：1285 就是两片手指碰上的位置，
+// 再收 80 个计数会差约 7° 合不拢。改这里必须同步改固件。
+const JOINT_RAW_MIN = [ 832, 1477, 3083, 1041, 1473, 1285];
+// 肘部 1013 → 1045：全行程实测命令 180°（raw 1013）时它只能到 raw 1037，
+// 差 24 个计数，等于每个 180° 姿态都在硬顶限位（负载 144）。改这里必须同步改固件的 RAW_MAX。
+const JOINT_RAW_MAX = [3265, 2618, 1045, 3000, 2623, 2731];
+
+// raw 位置 → 网页滑块角度（0~180）。和固件里的 posToAngle 互为反函数。
+function rawToAngle(i, raw) {
+  const lo = JOINT_RAW_MIN[i], hi = JOINT_RAW_MAX[i];
+  if (!Number.isFinite(raw) || hi === lo) return null;
+  if (lo <= hi) {
+    if (raw <= lo) return 0;
+    if (raw >= hi) return 180;
+    return Math.round(((raw - lo) * 180) / (hi - lo));
+  }
+  // 倒序关节：0 在 raw 大的那一端
+  if (raw >= lo) return 0;
+  if (raw <= hi) return 180;
+  return Math.round(((lo - raw) * 180) / (lo - hi));
+}
+
 let telemetry = null;   // { updatedAt, joints: [6] }
 let events = [];        // 最近的事件（碰撞/过热/堵转/低电），最多留 50 条
 let torqueOn = true;    // 舵机是否还带着力（保护触发后会松力）
 
 function emptyJoints() {
   return Array.from({ length: NUM_JOINTS }, () => ({
-    pos: null, deg: null, load: null, volt: null, temp: null, cur: null,
+    pos: null, deg: null, angle: null, load: null, volt: null, temp: null, cur: null,
   }));
 }
 
@@ -55,7 +94,8 @@ function handleTelemetry(body) {
   if (!telemetry) telemetry = { updatedAt: 0, joints: emptyJoints() };
   telemetry.joints[i] = {
     pos: rawPos,
-    deg: +((rawPos * 360) / 4096).toFixed(1),
+    deg: +((rawPos * 360) / 4096).toFixed(1),   // 舵机自己的轴角，只用于显示
+    angle: rawToAngle(i, rawPos),              // 网页滑块角度（0~180），控制用这个
     load: {
       // 负载寄存器：低 10 位是大小，bit 10(0x400) 是方向。
       // ⚠️ 是 bit 10，不是最高位 —— 固件里踩过这个坑。
@@ -606,6 +646,51 @@ app.get('/set', requireAuth, (req, res) => {
   } else {
     res.status(503).send('ESP32未连接');
   }
+});
+
+/**
+ * @openapi
+ * /api/grip:
+ *   get:
+ *     tags: [遥控]
+ *     summary: 夹爪夹持（加力 / 退档 / 松力）
+ *     description: |
+ *       和 /set 的区别：/set 是"把夹爪挪到某个角度"，
+ *       夹住东西以后位置被物体挡住，误差累积不起来，力矩也就上不去。
+ *
+ *       本接口让固件以「开始夹持时的实际位置」为基准，每档往闭合方向
+ *       多顶 2°，所以物体不动、手指不动，力矩也会一档档变紧。
+ *
+ *       固件在负载超过 45% 额定扭矩时会自己锁住，不再接受加档，
+ *       并上报一条 `griplimit` 事件。要更紧得先松力重新夹。
+ *     parameters:
+ *       - in: query
+ *         name: step
+ *         required: true
+ *         description: 档数。正数加力，负数退档，0 = 完全松力
+ *         schema:
+ *           type: integer
+ *           minimum: -20
+ *           maximum: 20
+ *           example: 1
+ *     responses:
+ *       200:
+ *         description: 命令已下发
+ *         content:
+ *           text/plain:
+ *             schema: { type: string, example: '1' }
+ *       401:
+ *         description: 未登录
+ *       503:
+ *         description: ESP32 未连接
+ */
+app.get('/api/grip', requireAuth, (req, res) => {
+  const step = Math.max(-20, Math.min(20, parseInt(req.query.step, 10) || 0));
+  const cmd = 'Z:' + step;
+  console.log('夹持命令:', cmd);
+  if (!esp32) return res.status(503).send('ESP32未连接');
+  esp32.send(cmd);
+  res.send(String(step));
 });
 
 // ---------- 留言 API ----------
