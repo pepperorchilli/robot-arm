@@ -21,6 +21,8 @@ secrets.h
 能力目录.txt
 能力评估与补缺清单.md
 简历素材.md
+# 简历等个人文档（文件名带真名，不写死在公开仓库里）
+*.docx
 
 # 硬件资料里解压出来的 Python 虚拟环境（1591 个文件 / 27MB，纯垃圾）
 **/hardware/docs/_x/
@@ -31,3 +33,6 @@ secrets.h
 # Python 字节码缓存
 __pycache__/
 *.pyc
+
+# Arduino / arduino-cli 编译中间产物（33MB，每次编译都会重新生成）
+**/build/
