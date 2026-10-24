@@ -18,23 +18,24 @@
  *   - 方案B：现有 12.6V 锂电 → 降压模块到 7.4V（≥5A）
  *   之前的 UBEC 5V 20A 用不上了。
  *
- *   每个舵机堵转电流约 2–3A，5 个同时动峰值很大：
+ *   每个舵机堵转电流约 2–3A，6 个同时动峰值很大：
  *   供电线要粗（≥20AWG），地线同样要粗。
  *
  * ==================== 接线（一条 3 线总线手拉手）====================
- *   5 个舵机的 DATA 全部并联成一条总线
- *   5 个舵机的 V+ / GND 分别并到 7.4V / GND
+ *   6 个舵机的 DATA 全部并联成一条总线（菊花链）
+ *   6 个舵机的 V+ / GND 分别并到 12.6V / GND
  *
- *   ESP32 GPIO17 (TX) ──[1kΩ]──→ 总线 DATA
- *   ESP32 GPIO16 (RX) ──────────→ 总线 DATA
+ *   ESP32 GPIO16 (TX) ──────────→ 微雪板 H2 的 TX   ← 直连，不交叉
+ *   ESP32 GPIO17 (RX) ──────────→ 微雪板 H2 的 RX
  *   ESP32 GND         ──────────→ 舵机 GND（必须共地）
  *
- *   ⚠️ 只发指令时，TX 直连即可。
- *   ⚠️ 要回读（力反馈/读角度）时，必须加 1kΩ 上拉到 3.3V，
- *      因为总线是半双工的，发完要把 TX 释放成高阻态才能让舵机说话。
+ *   ⚠️ 不需要串电阻。早期以为回读要在 DATA 上加 1kΩ 上拉，那是误判——
+ *      真因是半双工没释放：GPIO 矩阵把引脚一直钉在 UART 的 TX 输出上，
+ *      只改方向寄存器摘不掉。解决办法在软件里（见 arm-cloud-bus 的
+ *      busRelease / busAcquire），不是加电阻。
  *
  * ==================== 舵机 ID ====================
- *   出厂全是 ID=1！必须逐个改成 1~5，否则总线冲突。
+ *   出厂全是 ID=1！必须逐个改成 1~6，否则总线冲突。
  *   用本固件的串口命令 `id <旧ID> <新ID>` 逐个改，
  *   或者买 Feetech 官方 FE-URT-1 调试板用图形界面改（更省事）。
  *
@@ -55,8 +56,11 @@
 #include <HardwareSerial.h>
 
 // ==================== 配置 ====================
-#define SERVO_RX        16
-#define SERVO_TX        17
+// 引脚和 arm-cloud-bus 保持一致（那份是**实测确认**过的）：
+//   GPIO16 = TX、GPIO17 = RX。
+// 早先这里写反了（16 当 RX / 17 当 TX），照它接线总线一个字节都收不到。
+#define SERVO_TX        16
+#define SERVO_RX        17
 #define SERVO_BAUD      1000000     // STS3215 出厂默认 1Mbps
 
 const char* WIFI_SSID = "RobotArm-Test";
@@ -159,10 +163,18 @@ void syncWritePosition(const uint16_t* pos, uint8_t num) {
   sendPacket(p);
 }
 
-// ==================== 回读（力反馈用，需要 1kΩ 上拉）====================
+// ==================== 回读（力反馈用）====================
 /*
- * 半双工总线：ESP32 发完必须把 TX 释放成高阻态，舵机才能驱动同一条线回话。
- * 硬件上需要 TX 到 3.3V 接一个 1kΩ 上拉电阻。
+ * 半双工总线：ESP32 发完必须**真正把 TX 松手**，舵机才能驱动同一条线回话。
+ *
+ * ⚠️ 早先这里写着"硬件上需要 1kΩ 上拉"，**那是误判**。
+ *    真因是 pinMode(SERVO_TX, INPUT) 摘不掉 UART —— GPIO 矩阵把引脚一直钉在
+ *    UART 的 TX 输出上。要在软件里先把信号从矩阵摘下来再切输入，
+ *    收完用 uart_set_pin() 挂回去。做法见 arm-cloud-bus 的
+ *    busRelease() / busAcquire() —— **那份才是实测通过的**。
+ *
+ *    本文件是台面单测用的简化版，没做这一步，所以这里回读可能拿不到数据；
+ *    要读遥测请用 arm-cloud-bus。
  */
 void readReg(uint8_t id, uint8_t reg, uint8_t n, uint8_t* out) {
   uint8_t p[8];
@@ -285,7 +297,7 @@ void printHelp() {
   Serial.println("  move <id> <角度>  单个舵机转动（0~180）");
   Serial.println("  all <角度>        所有舵机同时转动");
   Serial.println("  center            全部回中（90°）");
-  Serial.println("  read <id>         读取位置和负载（需 1kΩ 上拉）");
+  Serial.println("  read <id>         读取位置和负载");
   Serial.println("  w                 开启 WiFi + 网页控制");
   Serial.println("==============================\n");
 }
@@ -355,7 +367,7 @@ void handleCommand(String line) {
     uint16_t pos = readPosition(id);
     uint16_t load = readLoad(id);
     if (pos == 0xFFFF) {
-      Serial.println("  ❌ 读不到。检查：TX 是否接了 1kΩ 上拉到 3.3V");
+      Serial.println("  ❌ 读不到。本文件没做半双工释放，回读请改用 arm-cloud-bus");
     } else {
       Serial.printf("  ID=%d 位置=%d (%.1f°) 负载=%d\n",
                     id, pos, pos * 360.0 / 4096.0, load);

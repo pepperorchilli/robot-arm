@@ -29,6 +29,10 @@
 
 #include "driver/uart.h"
 
+// ⚠️ 这两个是**排查期的引脚**（当时主固件的 SERVO_TX 还是 17），保留原样不动。
+//    主线固件 arm-cloud-bus 最终确认并实测通过的是 GPIO16 = TX / GPIO17 = RX。
+//    本文件是自包含的诊断（内部回环一根线都不用接），引脚取哪两个都能跑，
+//    但**别照抄这里的引脚去接线**。
 #define TX_PIN   17
 #define RX_PIN   16
 

@@ -26,18 +26,24 @@
  *   这两项**不需要任何额外硬件**，负载数据舵机本来就在回传。
  *
  * ==================== 供电 ====================
- *   STS3215 有 7.4V 和 12V 两个版本，别买错：
- *     7.4V 版 19.5kg·cm —— 只够 Leader 臂（手拖的，不出力）
- *     12V  版 30kg·cm  —— 官方 Follower 臂用的这个，本机是 Follower
- *   选 12V 版有个额外好处：支持 6–12.6V 宽压，**3S 锂电可以直驱**，
- *   整条 12.6V→7.4V 降压链路（模块、接线、故障点）全部砍掉。
+ *   STS3215 有 C001（7.4V）和 C047（4~14V）两个版本，别买错：
+ *     C001  19.5kg·cm —— 只够 Leader 臂（手拖的，不出力）
+ *     C047  30kg·cm   —— 官方 Follower 臂用的这个，本机是 Follower
+ *   选 C047 有个额外好处：支持 4~14V 宽压，**3S 锂电 12.6V 可以直驱**，
+ *   整条降压链路（模块、接线、故障点）全部砍掉。
+ *   ⚠️ 两个版本外观几乎一样；**C001 接 12.6V 会烧**。
  *
  * ==================== 接线 ====================
  *   6 个舵机的 DATA 并联成一条总线；V+ / GND 分别并到电源 / GND
  *
- *   ESP32 GPIO17 (TX) ──[1kΩ]──→ 总线 DATA   ← 1kΩ 上拉，回读时才需要
- *   ESP32 GPIO16 (RX) ──────────→ 总线 DATA
+ *   ESP32 GPIO16 (TX) ──────────→ 微雪板 H2 的 TX   ← 直连，不交叉
+ *   ESP32 GPIO17 (RX) ──────────→ 微雪板 H2 的 RX
  *   ESP32 GND         ──────────→ 舵机 GND（必须共地）
+ *
+ *   ⚠️ 完整接线规矩见下方「配置」一节里标注「实测确认」的那份，以它为准。
+ *      这里早期写的是「GPIO17 当 TX + 1kΩ 上拉」，两处都是错的：
+ *      引脚以 SERVO_TX 16 / SERVO_RX 17 为准，回读也不需要电阻
+ *      （真因是半双工没释放，已在软件里解决）。
  *
  * ==================== 首次使用 ====================
  *   1. cp secrets.h.example secrets.h，填 WiFi 和服务器地址
@@ -80,8 +86,50 @@ const int NUM = 6;   // SO-ARM101 有 6 个关节
 uint8_t SERVO_ID[NUM] = {1, 2, 3, 4, 5, 6};
 const char* NAMES[NUM] = {"底座", "肩部", "肘部", "腕俯仰", "腕旋转", "夹爪"};
 
-const uint16_t POS_CENTER = 2048;   // 0~4095 对应 0~360°，2048 是 180°（机械中位）
-const int MOVE_TIME = 400;          // 到达目标的毫秒数（舵机内部平滑）
+/*
+ * ⚠️ 装配校准：每个关节实测的机械行程（raw 位置，0~4095）
+ *
+ * 为什么需要这组数：官方装配流程要求「先把舵机转到中位，再装舵盘」。
+ * 这台机器是在舵盘任意角度下装好的，所以固件里那个绝对角度
+ * （90° → raw 1024）和实际机械姿态根本对不上 —— 上电「回中」会让
+ * 部分关节直接甩 150~240°，一头撞死在限位上。
+ *
+ * 解决分两步：
+ *   1) 硬件侧：改写每颗舵机的 OFS（位置偏移，寄存器 0x1F，存 EEPROM），
+ *      把各自的机械行程挪到 raw 2048 两侧。这样**任何目标都不会跨过
+ *      0/4095 边界** —— 实测这颗舵机的目标位置是单向单调的，
+ *      一旦跨边界它不会走近路，而是朝反方向绕一大圈。
+ *   2) 固件侧：滑块 0~180 线性映射到各自的 [RAW_MIN, RAW_MAX]。
+ *
+ * 数据来源：松力状态下用手把每个关节推到两端，记录 Present Position。
+ * 校准过程见 hardware/servo-tools/。两端各向内收 80 个计数（约 7°）
+ * 作为余量，不贴着机械限位走。
+ *
+ * 顺序：底座 → 肩 → 肘 → 腕俯仰 → 腕旋转 → 夹爪
+ *
+ * ⚠️ 方向：滑块 0 一律对准「机械臂收拢」的那一端 —— 拖到 0 就是六个关节
+ *   抱在一起，往右拖才一点点展开。所以这张表里存的不一定是「小的那个数」：
+ *   肘部折叠时的位置在 raw **大**的一端（实测 raw≈3092），
+ *   它的上下限就得**倒着写**（MIN > MAX），滑块往右 = raw 变小 = 展开。
+ *   angleToPos / posToAngle 都按「MIN 可以是大的」来处理，别假设 MIN < MAX。
+ *   底座和腕旋转没有天然的折叠方向（转到哪个角度都不影响收拢），
+ *   就按普通递增写，收拢姿态下它们大约落在 90°。
+ */
+// 夹爪（第 6 个）闭合端**不要余量**：它的机械极限 1285 就是"两片手指碰上"，
+// 按常规再收 80 个计数就永远差约 7° 合不拢，肉眼能看出来。
+// 所以这里直接给到 1285。代价是闭合时舵机会带一点静载，
+// 用串口 L 命令看负载，超过 ~200 说明其实在顶死，再往上收 20。
+const uint16_t RAW_MIN[NUM] = { 832, 1477, 3083, 1041, 1473, 1285 };
+// 腕俯仰（第 4 个）上限特意收到 3000 而不是 3055：实测命令 3055 时它只到 3028，
+// 末段被腕部自重压着上不去。留在这里会让舵机一直顶着劲发热，收一点就到位了。
+// 肘部（第 3 个）上限从 1013 收到 1045：全行程实测命令 180°（raw 1013）时
+// 它只能到 raw 1037，差 24 个计数，等于每个 180° 姿态都在硬顶限位（负载 144）。
+const uint16_t RAW_MAX[NUM] = {3265, 2618, 1045, 3000, 2623, 2731 };
+
+// 到达目标的毫秒数（舵机内部平滑）。
+// **运行时可变**：串口按 1/2/3 切换快/中/慢，立即写入所有舵机的 GOAL_TIME，
+// 不用重新烧录。录演示视频时切「慢」，日常用「快」。
+int MOVE_TIME = 400;
 
 // ---- 碰撞感知（自研部分）----
 // 首次上机调试建议先设 0 关掉：此时阈值还没标定，可能误触发。
@@ -100,12 +148,32 @@ const uint8_t  SPIKE_NEED = 2;    // 连续 N 次超阈值才认定，防单次�
 // 整机（6 个舵机同时使劲）能拉到 10V 以下，所以「停止」定在 10.0V。
 const uint8_t  TEMP_WARN = 65;      // °C，超过就报警
 const uint8_t  TEMP_STOP = 75;      // °C，超过就松力（再高温会退磁）
-// ⚠️ 台面联调开关 —— 现在台面用的是 C001（经 UBEC 供 5.1V），不是 12.6V 锂电。
-//    按 105 判的话，开机几秒后低压必然锁存 → 松力 → 滑块拖动舵机毫无反应，
-//    现象非常像"网页控制坏了"。练动作时先降到 45。
-//    换回 3S 锂电之前**必须**改回 105，否则低压保护形同虚设。
-const uint16_t VOLT_WARN = 45;      // ← 台面临时值（对应 4.5V）；装车改回 105
-const uint16_t VOLT_STOP = 100;     // 10.0V
+// 连续 N 次读到高温才认。总线偶发坏读数（尤其上电第一次读 15 字节块）
+// 会解出七八十度的假温度，只凭一次就松力，手臂会毫无征兆地软一下 ——
+// 实测踩到过：底座报 87°C，3 毫秒后肩部报 34°C，力被松开又立刻恢复。
+const uint8_t  TEMP_CONFIRM = 3;
+// ✅ 已装机：现在是 6 颗 C047 由 3S 锂电 12.6V 直驱，所以用正式阈值 105。
+//    台面联调那个临时值 45（4.5V）是给 C001 走 UBEC 5.1V 用的，
+//    留在车上的话低压保护形同虚设，会把锂电过放到损坏。
+//    以后要是再拿台面 C001 单测，临时把它改回 45，并且**记得改回来**。
+const uint16_t VOLT_WARN = 105;     // 10.5V：3S 锂电放到这里就该收了
+const uint16_t VOLT_STOP = 100;     // 10.0V：整机同时使劲会拉到 10V 以下，再低直接停
+
+// ---- 关节过载保护（每个关节单独计时）----
+// 碰撞看的是「负载突变」，抓不到「一直顶着 90% 不动」——
+// 而那恰恰最烤舵机：位置舵机在误差恒定时输出恒定力矩、恒定电流，
+// 温度会一直往上爬，最后退磁。所以这里按**持续时间**分级。
+// ⚠️ 这几个数是实测出来的，不是估的（2026-10 全行程 + 手挡堵转标定）：
+//     自由空间全行程运动，六个关节峰值负载 ≤ 160
+//     手掌压住前臂顶住不动，肘部负载直接到 1000（满量程），raw 完全不动
+//   负载寄存器的值正比于位置误差，所以"硬顶自己机械限位"反而不高
+//   （只差 24 个计数，实测才 144）——只有被**外部**卡住、误差消不掉才会满量程。
+//   中间那段留白就是"正常但吃力"：搬东西、横伸托举大概落在 200~500。
+const uint16_t LOAD_WARN    = 600;   // 60%：持续 10 秒只报警，不做动作
+const uint16_t LOAD_CRIT    = 850;   // 85%：接近实测堵转值 1000，必须处理
+const uint16_t LOAD_RECOVER = 300;   // 掉到 30% 以下才算负载真解除，计时归零
+const uint32_t LOAD_WARN_MS = 10000;
+const uint32_t LOAD_CRIT_MS = 3000;
 
 // ==================== STS/SCS 协议寄存器 ====================
 #define REG_TORQUE_ENABLE  0x28
@@ -158,13 +226,50 @@ uint8_t  pollIdx = 0;      // 轮询指针：一次 loop 只读一个关节
 // 保护状态（锁存：触发后要等条件真正恢复才解除，不然会反复触发）
 bool     torqueOn      = false;
 bool     overtempLatch = false;
-bool     tempWarned    = false;
+int8_t   overtempJoint = -1;   // 哪个关节锁存的：只有**它**降温才能解锁
+bool     tempWarned[NUM];      // 按关节记，不然 A 的高温提醒会被 B 的正常读数清掉
+uint8_t  hotCnt[NUM];          // 连续高温次数，见 TEMP_CONFIRM
 bool     lowbatLatch   = false;
 uint8_t  lowVoltCnt    = 0;    // 连续低压计数，滤掉负载造成的瞬时压降
+
+// 过载计时（每关节一份，互不影响）。
+// 存「何时开始」而不是「累计了多久」，省掉每个 loop 都加一次的开销，
+// 也天然不受 loop 抖动影响。
+uint32_t loadWarnSince[NUM];   // 进入 ≥LOAD_WARN 的时刻，0 = 没在计时
+uint32_t loadCritSince[NUM];   // 进入 ≥LOAD_CRIT 的时刻
+bool     loadWarned[NUM];      // 这一轮高负载已经报过了，别刷屏
+bool     loadHeld[NUM];        // 已经为这一轮堵转把目标钉在当前位置了
 
 // 到位回报：发完指令后等 MOVE_TIME 再回报，避免高频刷屏
 bool reportPending = false;
 unsigned long reportAt = 0;
+
+// ==================== 夹持加力（夹爪专用）====================
+/*
+ * 夹住东西以后，光拖滑块是不够的：
+ *   位置舵机的输出力矩 ∝ **目标位置和实际位置之差**。
+ *   物体挡住了，手指停在原地，你就算再把滑块往闭合方向拖，
+ *   遥测同步也会把滑块拽回实际位置（见 useArmControl.syncFromTelemetry），
+ *   误差根本累积不起来 —— 手感就是"拖不动了"。
+ *
+ * 所以单开一条通道：以**开始夹持那一刻的实际位置**为基准，
+ * 每按一次「加力」就把目标再往闭合方向多顶 GRIP_STEP_RAW 个计数。
+ * 物体不变形、手指不动都没关系，误差一档一档叠上去，
+ * 舵机输出的力矩也就一档一档变紧 —— 这就是"微微缩紧"。
+ *
+ * 位置读数照实回报，不做任何美化：
+ * 物体被压扁了、手指真合拢了，遥测里的角度会跟着变；
+ * 没变就是没变，界面显示的是实测值而不是我们的命令值。
+ */
+const int GRIPPER = 5;                 // 夹爪在数组里的下标
+const uint16_t GRIP_STEP_RAW  = 16;    // 一档 = 16 counts ≈ 2°
+const uint16_t GRIP_MAX_RAW   = 320;   // 最多累计 40°，再多纯粹是顶死发热
+const uint16_t GRIP_MAX_LOAD  = 450;   // 负载到 45% 额定扭矩就不再加大
+
+bool     gripActive  = false;   // 是否正在夹持
+bool     gripCapped  = false;   // 是否已因负载到顶而锁住（松力才解除）
+uint16_t gripBaseRaw = 0;       // 进入夹持时的实际位置
+uint16_t gripPushRaw = 0;       // 累计往闭合方向多顶的 raw 计数
 
 // ==================== 协议底层 ====================
 /*
@@ -232,20 +337,82 @@ void syncWritePosition(const uint16_t* pos, uint8_t num) {
 }
 
 // ==================== 角度换算 ====================
-// 网页的 0~180° 映射到舵机量程的一半（0~2048），另一半预留给需要更大行程的关节
-uint16_t angleToPos(int a) {
+/*
+ * 网页的 0~180° 线性映射到**该关节实测的机械行程**，不再是全量程。
+ * 六个关节行程各不相同（114°~228°），所以必须逐关节算。
+ */
+uint16_t angleToPos(int i, int a) {
   a = constrain(a, 0, 180);
-  return (uint16_t)map(a, 0, 180, 0, POS_CENTER);
+  // ⚠️ 这里不能假设 RAW_MIN < RAW_MAX：肘部是倒着写的（0° = 收拢 = raw 大）。
+  //    先转成有符号 long 再算，差值就是负的，加回去自然对。
+  long lo = RAW_MIN[i], hi = RAW_MAX[i];
+  return (uint16_t)(lo + (hi - lo) * a / 180);
+}
+
+/*
+ * 反函数：上电时把「当前实际位置」换算回滑块角度。
+ * 用途见 setup() 里「保持当前姿态」那段 —— 不回中，原地不动。
+ *
+ * ⚠️ 同样要认倒序关节。原来写的是
+ *      if (p <= RAW_MIN) return 0;  if (p >= RAW_MAX) return 180;
+ *    对 RAW_MIN=3083 / RAW_MAX=1013 的肘部，任何 p 都满足第二句，
+ *    于是**永远返回 180** —— 上电保持姿态时肘部会被一把拽向另一端。
+ *    倒序时改看「离哪一端近」。
+ */
+int posToAngle(int i, uint16_t p) {
+  long lo = RAW_MIN[i], hi = RAW_MAX[i];
+  if (lo <= hi) {
+    if (p <= lo) return 0;
+    if (p >= hi) return 180;
+    return (int)((p - lo) * 180 / (hi - lo));
+  }
+  // 倒序关节：滑块 0 在 raw 大的那一端
+  if (p >= lo) return 0;
+  if (p <= hi) return 180;
+  return (int)((lo - p) * 180 / (lo - hi));
+}
+
+/*
+ * 夹持状态下夹爪的原始目标位置。
+ * 注意是"基准 − 累计顶进量"：0° 那一端是闭合方向（见 RAW_MIN/MAX 的说明）。
+ * 夹到最紧也只能到 RAW_MIN[GRIPPER]，那是两片手指碰上的位置，
+ * 再往前就是硬顶机械限位，只会发热不会更紧。
+ */
+uint16_t gripperGoalRaw() {
+  long g = (long)gripBaseRaw - (long)gripPushRaw;
+  if (g < (long)RAW_MIN[GRIPPER]) g = RAW_MIN[GRIPPER];
+  return (uint16_t)g;
 }
 
 // 把当前所有目标角度一次性同步下发
 void applyTargets() {
   uint16_t pos[NUM];
-  for (int i = 0; i < NUM; i++) pos[i] = angleToPos(target[i]);
+  for (int i = 0; i < NUM; i++) {
+    // 夹持中的夹爪不走角度映射，直接用 raw 目标。
+    // 走映射的话目标会被 target[5]（跟着遥测回退的滑块值）盖掉，加力就废了。
+    pos[i] = (i == GRIPPER && gripActive) ? gripperGoalRaw() : angleToPos(i, target[i]);
+  }
   syncWritePosition(pos, NUM);
 
   reportPending = true;
   reportAt = millis() + MOVE_TIME + 50;
+}
+
+/*
+ * 退出夹持：目标回到「开始夹持那一刻的实际位置」，累计顶进量清零。
+ *
+ * 单独抽出来是因为现在有两个地方要松夹：
+ *   网页按「松力」（Z:0），以及过载保护判定夹爪顶死了。
+ * 两处必须做**完全一样**的事 —— 抽出来才不会改了一处漏了另一处。
+ */
+void releaseGrip() {
+  if (!gripActive) return;
+  target[GRIPPER]     = posToAngle(GRIPPER, gripBaseRaw);
+  prevTarget[GRIPPER] = target[GRIPPER];
+  gripActive = false;
+  gripCapped = false;
+  gripPushRaw = 0;
+  applyTargets();
 }
 
 /*
@@ -342,19 +509,30 @@ bool readTelemetry(uint8_t id, uint8_t* out, uint8_t len) {
  */
 bool pingServo(uint8_t id) {
   uint8_t p[6] = {0xFF, 0xFF, id, 2, INST_PING, 0};
-  sendPacket(p);
 
-  busRelease();                    // 松手，等回包
-  uint8_t buf[6] = {0};
-  uint8_t got = 0;
-  uint32_t t0 = millis();
-  while (got < 6 && millis() - t0 < 10) {
-    if (servoBus.available()) buf[got++] = servoBus.read();
+  /*
+   * 最多试 3 次。原因：**上电后第一个被访问的舵机经常收不到回包**。
+   * 微雪转接板的半双工收发器上电后方向控制还没稳，第一帧被吃掉。
+   * 症状极具迷惑性：ID 1 永远 ✗、2~6 全 ✓ —— 而 ID 1 恰好总是
+   * 第一个被 ping 的（循环从 0 开始）。换回 USB 模式又好了，
+   * 很容易误判成「底座那根线松了 / 底座舵机坏了」。
+   */
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    sendPacket(p);
+    busRelease();                    // 松手，等回包
+    uint8_t buf[6] = {0};
+    uint8_t got = 0;
+    uint32_t t0 = millis();
+    while (got < 6 && millis() - t0 < 10) {
+      if (servoBus.available()) buf[got++] = servoBus.read();
+    }
+    while (servoBus.available()) servoBus.read();
+    busAcquire();
+
+    if (buf[0] == 0xFF && buf[1] == 0xFF && buf[2] == id) return true;
+    delay(5);
   }
-  while (servoBus.available()) servoBus.read();
-  busAcquire();
-
-  return buf[0] == 0xFF && buf[1] == 0xFF && buf[2] == id;
+  return false;
 }
 
 // ==================== 遥测 + 碰撞 + 保护（自研部分）====================
@@ -401,6 +579,29 @@ void pollJoint() {
   // 所以顺路判掉，不用另开定时器。
   checkProtection(i, temp, volt);
 
+  // ---- 过载 / 堵转：按「持续时间」判，和上面的温度是两个独立的角 ----
+  // 放在夹持分支**之前**：夹持中的夹爪万一真顶到 85%，松夹也比烧舵机强。
+  checkOverload(i, mag, pos);
+
+  /*
+   * ---- 夹持中的夹爪：只看到达负载上限，不做碰撞回退 ----
+   *
+   * 夹紧的时候负载就是会猛涨，那是**预期行为**，不是撞到东西了。
+   * 放进下面的碰撞逻辑里，用户每按一次加力都会被判成碰撞、
+   * 自动退回上一位置 —— 加力按钮等于失效。
+   * 所以单独走一条路：超过 GRIP_MAX_LOAD 就锁住，不再允许加大。
+   */
+  if (i == GRIPPER && gripActive) {
+    lastLoad[i] = mag;    // 仍然跟住负载，松力后恢复碰撞判定时不会误报
+    spikeCnt[i] = 0;
+    if (mag >= GRIP_MAX_LOAD && !gripCapped) {
+      gripCapped = true;
+      Serial.printf("✋ 夹持到顶（负载 %u ≥ %u）→ 不再加大\n", mag, GRIP_MAX_LOAD);
+      ws.sendTXT("E:griplimit," + String(GRIPPER) + "," + String(mag));
+    }
+    return;
+  }
+
   // ---- 碰撞判定 ----
   // 用 #if 而不是 if：关掉时这段彻底不编译，省下 flash 也避免
   // 一个"看起来在跑其实被短路"的假象。
@@ -441,29 +642,46 @@ void pollJoint() {
  * 过温只松力不锁死：锁死等于让它保持堵转，反而烧得更快。
  */
 void checkProtection(uint8_t i, uint8_t temp, uint8_t volt) {
-  if (temp >= TEMP_STOP && !overtempLatch) {
-    overtempLatch = true;
-    Serial.printf("🔥 %s 过温 %u°C（≥%u）→ 松力\n", NAMES[i], temp, TEMP_STOP);
-    ws.sendTXT("E:overtemp," + String(i) + "," + String(temp));
-    setTorque(false);
-  } else if (temp >= TEMP_WARN && !tempWarned) {
-    tempWarned = true;
-    Serial.printf("🌡️  %s 温度偏高 %u°C\n", NAMES[i], temp);
-    ws.sendTXT("E:overtemp_warn," + String(i) + "," + String(temp));
-  } else if (temp < TEMP_WARN - 5) {
-    // 带 5°C 迟滞：不然在阈值上下抖动会刷屏
-    tempWarned = false;
-    if (overtempLatch && temp < TEMP_WARN) {
+  // ---- 温度：先确认再动作 ----
+  // 一次坏读数不值得把整条手臂的力松掉，连续 TEMP_CONFIRM 次才算。
+  if (temp >= TEMP_WARN) {
+    if (hotCnt[i] < 255) hotCnt[i]++;
+  } else {
+    hotCnt[i] = 0;
+    // 迟滞 5°C，免得在阈值上下抖动反复开关力。
+    // ⚠️ 只认**锁存的那个关节**降温：以前是任何关节读到凉快就解锁，
+    //    底座烧到 76°C、肩部 40°C 就会来回解锁/锁存，力一闪一闪。
+    if (overtempLatch && i == overtempJoint && temp < TEMP_WARN - 5) {
       overtempLatch = false;
+      overtempJoint = -1;
       setTorque(true);
       Serial.println("❄️  温度回落，恢复扭矩");
     }
   }
 
+  if (temp >= TEMP_STOP && !overtempLatch && hotCnt[i] >= TEMP_CONFIRM) {
+    overtempLatch = true;
+    overtempJoint = i;
+    Serial.printf("🔥 %s 过温 %u°C（≥%u）→ 松力\n", NAMES[i], temp, TEMP_STOP);
+    ws.sendTXT("E:overtemp," + String(i) + "," + String(temp));
+    setTorque(false);
+  } else if (temp >= TEMP_WARN && hotCnt[i] >= TEMP_CONFIRM && !tempWarned[i]) {
+    tempWarned[i] = true;
+    Serial.printf("🌡️  %s 温度偏高 %u°C\n", NAMES[i], temp);
+    ws.sendTXT("E:overtemp_warn," + String(i) + "," + String(temp));
+  } else if (temp < TEMP_WARN - 5) {
+    tempWarned[i] = false;
+  }
+
   // 电压：6 个舵机同时使劲时会被拉低，所以只看持续低压。
   // 单次低于阈值不报 —— 那是负载造成的正常压降，不是电池没电了。
   if (volt > 0 && volt < VOLT_WARN) {
-    if (++lowVoltCnt >= 10 && !lowbatLatch) {   // 连续 10 轮（约几秒）
+    // 低于 VOLT_STOP 不再等「持续」：10.5V 是"该充电了"，
+    // 10.0V 已经是电芯过放边缘，多撑几秒换不来什么，直接把计数拉满。
+    if (volt < VOLT_STOP) lowVoltCnt = 10;
+    else if (lowVoltCnt < 10) lowVoltCnt++;
+
+    if (lowVoltCnt >= 10 && !lowbatLatch) {
       lowbatLatch = true;
       Serial.printf("🪫 电压低 %u.%uV → 停手，请充电\n", volt / 10, volt % 10);
       ws.sendTXT("E:lowbat,," + String(volt));
@@ -472,6 +690,108 @@ void checkProtection(uint8_t i, uint8_t temp, uint8_t volt) {
   } else {
     lowVoltCnt = 0;
     if (lowbatLatch && volt >= VOLT_WARN) lowbatLatch = false;   // 换了电池就复位
+  }
+}
+
+/*
+ * 过载 / 堵转保护（防烧舵机）。
+ *
+ * 和碰撞判定的分工：
+ *   碰撞 = 负载**突变** → 几十毫秒内撞上东西，退回上一位置就完事。
+ *   过载 = 负载**持续**高 → 慢慢顶死，或者长时间重力负载，
+ *          没有突变，碰撞逻辑永远看不见，但它才是最烤舵机的那种。
+ *
+ * 两级动作：
+ *   ≥60% 10 秒  → 只报警。正常托举也可能到 60%，不能动不动就动手臂。
+ *   ≥85%  3 秒  → 到上限：把目标改成**当前实际位置**，误差归零，舵机立刻
+ *                 停止推进。手臂停在原地，不后退、不松力、不掉。
+ *
+ * 为什么是「停在原地」而不是退回或松力：
+ *   负载寄存器正比于位置误差，被外部挡住时误差消不掉才会顶到满量程。
+ *   把目标钉在当前位置，误差当场变成 0，舵机自然就撒劲了 ——
+ *   这是唯一既不让它继续烤、又不会让手臂突然塌下来的做法。
+ *   代价是挡着的东西挪开以后它不会自己恢复，要重新下指令。
+ *
+ * 为什么不需要锁存：
+ *   停在原地本身就是可恢复的 —— 下一帧目标一到，它照常走。
+ *   真顶死的话每 LOAD_CRIT_MS 会重新钉一次，负载永远上不去，
+ *   所以没有「必须先断电」这种状态。
+ */
+void checkOverload(uint8_t i, uint16_t mag, uint16_t pos) {
+  uint32_t now = millis();
+
+  // 负载真的降下来了 → 计时全部归零，准备下一次判定。
+  // 用 30% 而不是临界值 85%：中间那一段（30%~85%）说明已经脱离堵转，
+  // 只是还在使劲。这时把计时清掉，下次真顶死要重新累计满 3 秒才动作 ——
+  // 不然一次长动作会被反复判成堵转。
+  if (mag < LOAD_RECOVER) {
+    loadWarnSince[i] = 0;
+    loadCritSince[i] = 0;
+    loadWarned[i]    = false;
+    loadHeld[i]      = false;
+    return;
+  }
+
+  // ---- 第一级：提醒 ----
+  if (mag >= LOAD_WARN) {
+    if (loadWarnSince[i] == 0) {
+      loadWarnSince[i] = now;
+    } else if (!loadWarned[i] && now - loadWarnSince[i] >= LOAD_WARN_MS) {
+      loadWarned[i] = true;
+      Serial.printf("⚠️  %s 持续高负载 %u（≥%u，已 10 秒）\n",
+                    NAMES[i], mag, LOAD_WARN);
+      ws.sendTXT("E:loadwarn," + String(i) + "," + String(mag));
+    }
+  } else {
+    loadWarnSince[i] = 0;
+    loadWarned[i]    = false;
+  }
+
+  // ---- 第二级：到上限就停在原地 ----
+  if (mag < LOAD_CRIT) {
+    loadCritSince[i] = 0;
+    loadHeld[i]      = false;
+    return;
+  }
+
+  if (loadCritSince[i] == 0) {          // 刚顶上去，先看满 3 秒
+    loadCritSince[i] = now;
+    Serial.printf("⏱ %s 负载 %u ≥ %u，开始计时\n", NAMES[i], mag, LOAD_CRIT);
+    return;
+  }
+  if (now - loadCritSince[i] < LOAD_CRIT_MS) return;
+
+  // 还顶死 → 重新钉一次、重新计时。挡着的东西没挪开，就每 3 秒钉一次，
+  // 负载不会有机会继续往上冲。
+  loadCritSince[i] = now;
+  // 主动改了目标，负载必然变化。把基线跟过去，
+  // 否则下一轮碰撞判定会把这次自己造成的负载变化当成"撞到了"。
+  lastLoad[i] = mag;
+  spikeCnt[i] = 0;
+
+  if (i == GRIPPER && gripActive) {
+    // 夹持中的夹爪没有「当前目标」可钉 —— 目标被 gripperGoalRaw() 接管了，
+    // 改 target[] 不生效。这种时候只能松夹，等价于用户按了「松力」。
+    releaseGrip();
+    if (!loadHeld[i]) {
+      loadHeld[i] = true;
+      Serial.printf("🛑 夹爪夹持负载 %u ≥ %u → 松力\n", mag, LOAD_CRIT);
+      ws.sendTXT("E:stall," + String(i) + "," + String(mag));
+    }
+    return;
+  }
+
+  int hold = posToAngle(i, pos);
+  target[i]     = hold;
+  prevTarget[i] = hold;
+  applyTargets();
+
+  // 只在**刚进入**这个状态时上报一次，之后每 3 秒的重钉不再刷屏。
+  if (!loadHeld[i]) {
+    loadHeld[i] = true;
+    Serial.printf("🛑 %s 负载 %u ≥ %u → 停在当前位置 %d°（不再使劲）\n",
+                  NAMES[i], mag, LOAD_CRIT, hold);
+    ws.sendTXT("E:stall," + String(i) + "," + String(mag));
   }
 }
 
@@ -490,6 +810,68 @@ void onMessage(WStype_t type, uint8_t* payload, size_t length) {
       String msg = String((char*)payload);
       msg.trim();
       Serial.println("收到命令: " + msg);
+
+      /*
+       * 夹持命令 "Z:<档数>"：
+       *   Z:2   加 2 档（每档 ≈ 2°），连续按就一档档变紧
+       *   Z:-1  退一档（还夹着，只是松一点）
+       *   Z:0   完全松力，目标回到开始夹持时的位置
+       *
+       * ⚠️ 必须放在下面那个通用解析**之前**：通用解析会把 "Z" 当成
+       *    舵机编号（toInt 得 0），于是 "Z:2" 被理解成"底座转到 2°"，
+       *    一按加力底座就甩过去。
+       */
+      if (msg.startsWith("Z:")) {
+        int n = constrain(msg.substring(2).toInt(), -20, 20);
+
+        if (n == 0) {
+          // ---- 松力 ----
+          if (gripActive) {
+            releaseGrip();
+            Serial.println("夹持：松力");
+          }
+          break;
+        }
+
+        if (!gripActive) {
+          // ---- 第一次加力：先把"现在夹在哪儿"记成基准 ----
+          uint8_t buf[2];
+          bool ok = false;
+          for (int a = 0; a < 3 && !ok; a++) {
+            ok = readTelemetry(SERVO_ID[GRIPPER], buf, 2);
+            if (!ok) delay(5);
+          }
+          if (!ok) {
+            // 读不到位置就**一点都不动**。没有基准的加力等于瞎顶。
+            Serial.println("夹持：读不到夹爪位置，不加力");
+            ws.sendTXT("E:gripfail," + String(GRIPPER) + ",");
+            break;
+          }
+          gripBaseRaw = buf[0] | (buf[1] << 8);
+          gripPushRaw = 0;
+          gripActive  = true;
+          gripCapped  = false;
+          Serial.printf("夹持开始，基准 raw=%u\n", gripBaseRaw);
+        }
+
+        if (n > 0 && gripCapped) {
+          // 已经顶到负载上限了，再按也不加。要更紧得先松力重新夹。
+          Serial.println("夹持：已到负载上限，先松力才能再加");
+          ws.sendTXT("E:griplimit," + String(GRIPPER) + "," + String(GRIP_MAX_LOAD));
+          break;
+        }
+
+        long next = (long)gripPushRaw + (long)n * GRIP_STEP_RAW;
+        if (next < 0) next = 0;
+        if (next > GRIP_MAX_RAW) next = GRIP_MAX_RAW;
+        gripPushRaw = (uint16_t)next;
+        if (n < 0) gripCapped = false;   // 退了一档就不再算锁死
+
+        applyTargets();
+        Serial.printf("夹持：%+d 档，累计 %u raw，目标 raw=%u\n",
+                      n, gripPushRaw, gripperGoalRaw());
+        break;
+      }
 
       // 命令格式: "舵机编号:角度"  例如 "0:45"
       int colon = msg.indexOf(':');
@@ -519,6 +901,11 @@ void setup() {
   // ---- 总线舵机初始化 ----
   servoBus.begin(SERVO_BAUD, SERIAL_8N1, SERVO_RX, SERVO_TX);
 
+  // 给转接板的收发器一点上电稳定时间。太短的话第一帧必丢，
+  // 表现就是自检里第一个被访问的 ID 显示 ✗（详见 pingServo）。
+  delay(300);
+  while (servoBus.available()) servoBus.read();   // 清掉上电毛刺
+
   // ---- 总线自检：先确认谁在线，再开扭矩 ----
   // 放在开扭矩之前：如果 ID 撞号，宁可不动作，也不要让撞号的舵机乱转。
   Serial.print("总线自检: ");
@@ -536,21 +923,69 @@ void setup() {
     Serial.println("   3) DATA 接错 —— ESP32 TX 应经 1kΩ 上拉到总线 DATA");
   }
 
-  for (int i = 0; i < NUM; i++) {
-    writeWord(SERVO_ID[i], REG_GOAL_TIME, MOVE_TIME); // 设定到达时间
-  }
-  // ⚠️ 必须走 setTorque，不能直接写 REG_TORQUE_ENABLE。
-  //    torqueOn 初值是 false，绕过 setTorque 的话这个变量就还是 false，
-  //    而舵机实际已经上力了 —— 之后保护动作调 setTorque(false) 会因为
-  //    "值没变" 被提前 return，**过温保护就成了哑炮**。
-  setTorque(true);   // 开扭矩
-  delay(100);
-  applyTargets();   // 全部回中
-  Serial.println("总线舵机初始化完成（全部回中 90°）");
+  /*
+   * 一个都没应答 → **一个字节都不要发**。
+   *
+   * 以前这里不管自检结果，继续用默认的 90° 调 applyTargets()。
+   * 那意味着：先插 USB 让固件跑起来、之后才开舵机电源时，
+   * 固件已经朝空总线发过一遍"六个关节全部到 90°"——舵机一上电收到
+   * 下一条命令就会被同时拽到 90°，手臂会毫无征兆地甩出去。
+   * 没读到真实位置，就没有资格发目标。
+   */
+  if (online == 0) {
+    Serial.println("⛔ 总线无任何应答 → 不发送任何目标位置，舵机保持原状。");
+    Serial.println("   先确认：舵机电源开关开了吗？共地了吗？");
+    Serial.println("   接线检查完按 RST 重新自检。");
+  } else {
+    if (online < NUM) {
+      // 部分应答：读不到位置的那个关节会用默认 90°，
+      // 一旦下命令它就会往 90° 跑。宁可说清楚，也不要用户被吓一跳。
+      Serial.println("⚠️ 有舵机没应答：读不到位置的那个关节会按 90° 处理，"
+                     "下命令前先确认它当前位置。");
+    }
+
+    for (int i = 0; i < NUM; i++) {
+      writeWord(SERVO_ID[i], REG_GOAL_TIME, MOVE_TIME); // 设定到达时间
+    }
+    // ⚠️ 必须走 setTorque，不能直接写 REG_TORQUE_ENABLE。
+    //    torqueOn 初值是 false，绕过 setTorque 的话这个变量就还是 false，
+    //    而舵机实际已经上力了 —— 之后保护动作调 setTorque(false) 会因为
+    //    "值没变" 被提前 return，**过温保护就成了哑炮**。
+    setTorque(true);   // 开扭矩
+    delay(100);
+
+    /*
+     * ⚠️ 上电**不回中**，原地保持。
+     *
+     * 舵盘是在舵机任意角度下装上去的，「回中」对这台机器意味着让关节
+     * 甩几十上百度过某个陌生位置，很容易撞到桌子或自己。
+     * 所以先读当前位置、反算成滑块角度、原样下发一遍 —— 手臂纹丝不动，
+     * 只是把力打上，之后就由网页从当前姿态接着控制。
+     */
+    for (int i = 0; i < NUM; i++) {
+      uint8_t buf[2];
+      bool ok = false;
+      for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+        ok = readTelemetry(SERVO_ID[i], buf, 2);
+        if (!ok) delay(5);
+      }
+      if (ok) {
+        uint16_t p = buf[0] | (buf[1] << 8);
+        target[i] = posToAngle(i, p);
+        prevTarget[i] = target[i];
+        Serial.printf("   %s 当前位置 %u → 滑块 %d°\n", NAMES[i], p, target[i]);
+      } else {
+        Serial.printf("   %s 读不到当前位置，保持默认 %d°\n", NAMES[i], target[i]);
+      }
+    }
+    applyTargets();
+    Serial.println("总线舵机初始化完成（保持当前姿态）");
+  }   // end: online > 0
 
   // ---- 连 WiFi（STA 模式）----
   Serial.printf("连接 WiFi: %s ", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAt = millis();
@@ -567,6 +1002,27 @@ void setup() {
   Serial.println("\n✅ WiFi 已连接");
   Serial.print("   本机 IP: ");
   Serial.println(WiFi.localIP());
+
+  /*
+   * ⚠️ 发射功率必须**连上之后再压**，不能放在 WiFi.begin() 前面。
+   *
+   * 这台板子是**电脑 USB 供电**，WiFi 持续发射时的电流尖峰会把 3.3V
+   * 拉塌，日志里表现为 `E BOD: Brownout detector was triggered` 然后复位，
+   * 无限重启循环 —— 而且往往正好发生在连上服务器前后，看着像服务器的问题。
+   *
+   * 以前把 setTxPower 写在 begin() 之前，等于白写：STA 驱动在 begin()
+   * 里会把功率重新设回默认 20dBm，之前那句被覆盖掉了。所以时好时坏。
+   * 现在放在连上之后，才是真正生效的时机。
+   *
+   * 8.5dBm 在同一个房间里连路由器绰绰有余，用一点信号余量换稳定性很划算。
+   * 如果换了好线好口还是掉，再往下调到 WIFI_POWER_5dBm。
+   */
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  Serial.printf("   RSSI: %d dBm\n", WiFi.RSSI());
+
+  // 给电源一点缓冲时间再开 WebSocket：紧接着 WiFi 关联结束后
+  // 立刻跑 TLS/TCP 握手，电流尖峰会叠在一起，容易正好踩在 BOD 上。
+  delay(300);
 
   // ---- 连服务器（token 放在连接地址里，服务器会校验）----
   // ⚠️ 路径必须是 /ws，不能是 /
@@ -598,6 +1054,18 @@ void setup() {
 void handleSerial() {
   if (!Serial.available()) return;
   char c = Serial.read();
+
+  // '1' '2' '3' —— 切换动作速度（到位时间）。
+  //      录演示视频时切「慢」动作好看，平时用「快」跟手。
+  //      改的是舵机的 GOAL_TIME 寄存器，对六个关节立即生效，不用重新烧录。
+  if (c == '1' || c == '2' || c == '3') {
+    MOVE_TIME = (c == '1') ? 400 : (c == '2') ? 900 : 1800;
+    for (int i = 0; i < NUM; i++) {
+      writeWord(SERVO_ID[i], REG_GOAL_TIME, (uint16_t)MOVE_TIME);
+    }
+    Serial.printf("动作速度: %d ms/段（1=快 2=中 3=慢）\n", MOVE_TIME);
+    return;
+  }
 
   // 'S' —— 连接状态。网页上"拖滑块没反应"时，先用它判断卡在哪一段：
   //       WiFi 没连 / 服务器没连 / 连上了但扭矩被保护松掉了。
@@ -659,6 +1127,42 @@ void handleSerial() {
     return;
   }
 
+  // 'R' —— 松力。台面校准要用：固件正常运行时是带力保持的，
+  //       不松力就没法用手把机械臂摆到机械限位。
+  if (c == 'R' || c == 'r') {
+    setTorque(false);
+    Serial.println("已松力 —— 手臂会软下来，先扶稳再撒手");
+    return;
+  }
+
+  // 'T' —— 上力。摆完要接着控制时用它，不用重新上电。
+  if (c == 'T' || c == 't') {
+    setTorque(true);
+    Serial.println("已上力（原地保持，不会动）");
+    return;
+  }
+
+  // 'P' —— 打印六个关节的原始位置。校准抄数用。
+  //       angle 是**当前映射**下的滑块角度，用来判断这一端该算 0 还是 180。
+  if (c == 'P' || c == 'p') {
+    for (int i = 0; i < NUM; i++) {
+      uint8_t buf[2];
+      bool ok = false;
+      for (int a = 0; a < 3 && !ok; a++) {
+        ok = readTelemetry(SERVO_ID[i], buf, 2);
+        if (!ok) delay(5);
+      }
+      if (ok) {
+        uint16_t p = buf[0] | (buf[1] << 8);
+        Serial.printf("%d %s raw=%u angle=%d\n",
+                      SERVO_ID[i], NAMES[i], p, posToAngle(i, p));
+      } else {
+        Serial.printf("%d %s 读不到\n", SERVO_ID[i], NAMES[i]);
+      }
+    }
+    return;
+  }
+
   if (c != 'L' && c != 'l') return;
 
   Serial.print("负载: ");
@@ -671,7 +1175,28 @@ void handleSerial() {
     uint16_t raw = t[TELEM_LOAD] | (t[TELEM_LOAD + 1] << 8);
     Serial.printf("%s=%u ", NAMES[i], raw & LOAD_MASK);
   }
-  Serial.printf(" (阈值 delta=%u floor=%u)\n", LOAD_DELTA, LOAD_FLOOR);
+  Serial.printf(" (碰撞 delta=%u floor=%u / 过载 warn=%u crit=%u)\n",
+                LOAD_DELTA, LOAD_FLOOR, LOAD_WARN, LOAD_CRIT);
+
+  // 哪个关节正在往「堵转」的方向累计时间。台面调阈值时靠这行看，
+  // 不然只能等它真触发才知道阈值定高了还是低了。
+  uint32_t now = millis();
+  bool any = false;
+  for (int i = 0; i < NUM; i++) {
+    if (loadWarnSince[i] == 0 && loadCritSince[i] == 0) continue;
+    if (!any) {
+      Serial.print("过载计时: ");
+      any = true;
+    }
+    Serial.printf("%s", NAMES[i]);
+    if (loadCritSince[i]) {
+      Serial.printf("(临界 %.1fs)", (now - loadCritSince[i]) / 1000.0);
+    } else {
+      Serial.printf("(偏高 %.1fs)", (now - loadWarnSince[i]) / 1000.0);
+    }
+    Serial.print(" ");
+  }
+  if (any) Serial.println();
 }
 
 void loop() {
