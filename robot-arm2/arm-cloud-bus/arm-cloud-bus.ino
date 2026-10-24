@@ -1055,15 +1055,15 @@ void handleSerial() {
   if (!Serial.available()) return;
   char c = Serial.read();
 
-  // '1' '2' '3' —— 切换动作速度（到位时间）。
-  //      录演示视频时切「慢」动作好看，平时用「快」跟手。
-  //      改的是舵机的 GOAL_TIME 寄存器，对六个关节立即生效，不用重新烧录。
-  if (c == '1' || c == '2' || c == '3') {
-    MOVE_TIME = (c == '1') ? 400 : (c == '2') ? 900 : 1800;
+  // '1' '2' '3' '4' —— 切换动作速度（到位时间）。
+  //      录演示视频时切「很慢」，底盘不容易被甩倒，动作也看得清；
+  //      平时用「快」跟手。改的是舵机的 GOAL_TIME 寄存器，立即生效，不用重烧。
+  if (c >= '1' && c <= '4') {
+    MOVE_TIME = (c == '1') ? 400 : (c == '2') ? 900 : (c == '3') ? 1800 : 3000;
     for (int i = 0; i < NUM; i++) {
       writeWord(SERVO_ID[i], REG_GOAL_TIME, (uint16_t)MOVE_TIME);
     }
-    Serial.printf("动作速度: %d ms/段（1=快 2=中 3=慢）\n", MOVE_TIME);
+    Serial.printf("动作速度: %d ms/段（1=快 2=中 3=慢 4=很慢）\n", MOVE_TIME);
     return;
   }
 
