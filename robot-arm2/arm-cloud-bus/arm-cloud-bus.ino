@@ -139,7 +139,24 @@ int MOVE_TIME = 400;
 #define LOAD_ERR        0xFFFF   // 读寄存器失败时的返回值
 #define LOAD_MASK       0x03FF   // 负载只有低 10 位是数值，见下面 pollJoint 的说明
 
-uint16_t LOAD_DELTA = 250;  // 负载「突变」阈值，不是绝对阈值（需标定，串口 d<数字> 可现场改）
+/*
+ * 负载「突变」阈值（不是绝对阈值），串口 d<数字> 可现场改。
+ *
+ * 2026-10-25 实测标定：400ms 快档下跑 10 个大幅动作，量每条指令过程中的
+ * 最大突变（固件 deltaPeak，S 命令可读）：
+ *
+ *   肘部 0→60   300     腕俯仰 0→60   252     底座 95→60   236
+ *   肘部 60→0   192     腕俯仰 60→0   224     底座 60→95   244
+ *   腕旋转 85→20 216     腕旋转 20→85  236     夹爪 39→120  164 / 120→39 228
+ *
+ * 正常动作最高 300；而真被手顶住时负载从 48 一路冲到 1000，单次突变 800+。
+ * 原来取 250 —— 正好压在正常动作的区间里，快速大幅动作必然误判
+ * （实测肘部 70→0 就被判成碰撞、回退）。取 500：高过正常峰值 1.67 倍，
+ * 又比真实阻挡低，两头都留了余量。
+ *
+ * 注意这个值和**动作速度**相关：上面是 400ms 快档的数据，慢档会更小。
+ */
+uint16_t LOAD_DELTA = 500;
 const uint16_t LOAD_FLOOR = 120;  // 低于此值视为空载抖动，不判碰撞
 const uint8_t  SPIKE_NEED = 2;    // 连续 N 次超阈值才认定，防单次抖动误报
 
@@ -258,6 +275,11 @@ uint16_t telemFail[NUM];
 // 每满 TELEMFAIL_REPORT 次往服务器发一条事件，远在局域网的这头也能看见。
 uint16_t telemFailStreak[NUM];
 #define TELEMFAIL_REPORT 20
+
+// 每条指令执行过程中见过的**最大负载突变**（每条新指令清零）。
+// 用来标定 LOAD_DELTA：先量出「正常快速动作能抖出多大」，阈值必须比它高；
+// 再量出「真撞上/顶住能跳多大」，阈值必须比它低。区间取中间。
+uint16_t deltaPeak[NUM];
 
 // 命令看门狗的状态。每个关节一份 —— 一个关节顶住了，别的照常动。
 uint8_t  lastGoodAngle[NUM];   // 最后一次读到的滑块角度（0~180）
@@ -672,6 +694,7 @@ void pollJoint() {
   // 负载在几十毫秒内**跳变**。所以要的是 delta，不是绝对值。
   uint16_t delta = (mag > lastLoad[i]) ? (mag - lastLoad[i])
                                        : (lastLoad[i] - mag);
+  if (delta > deltaPeak[i]) deltaPeak[i] = delta;   // 标定用，见 S 命令
   lastLoad[i] = mag;
 
   if (delta < LOAD_DELTA || mag < LOAD_FLOOR) { spikeCnt[i] = 0; return; }
@@ -883,6 +906,7 @@ void checkMoveWatchdog(uint8_t i) {
     moveGoal[i]    = target[i];
     moveStartMs[i] = now;
     wdHeld[i]      = false;
+    deltaPeak[i]   = 0;      // 新指令：这次动作的突变峰值重新统计
   }
 
   if (moveStartMs[i] == 0) return;    // 没有待达成的移动
@@ -1176,16 +1200,17 @@ void setup() {
 
 /*
  * ==================== 负载标定 ====================
- * LOAD_DELTA / LOAD_FLOOR 是估的，必须实测标定，否则会误触发。
+ * LOAD_DELTA 已经在 2026-10-25 用 10 个大幅动作 + 一次手挡堵转标定过，
+ * 具体数据和取值理由见文件顶部的 LOAD_DELTA 注释。这里留的是**复标方法**，
+ * 换了舵机、改了动作速度、或者换了更重的负载时照做一遍：
  *
- *   1. 串口发 L → 打印 6 个关节当前负载
- *   2. 让机械臂**空载慢速走完全程**，记下每个关节负载的最大波动
- *      → LOAD_FLOOR 取这个波动的 1.5 倍左右
- *   3. 让机械臂自由运动中**用手轻挡一下**，记下负载跳变量
- *      → LOAD_DELTA 取「正常波动」和「阻挡跳变」之间，偏大一点更稳
- *   4. 都填回文件顶部，重新烧录
- *
- * 标定期间把 ENABLE_COLLISION 设 0，避免误触发干扰观察。
+ *   1. 串口 d1000 → 先关掉碰撞判定，免得它中途回退干扰测量
+ *   2. 串口 1 → 切到最快档（突变峰值跟速度强相关，要按最快的量）
+ *   3. 逐个关节走大幅动作，每条指令之后串口发 S
+ *      → 看「突变峰值」那一行，取**被命令的那个关节**的值
+ *   4. 再让机械臂自由运动中用手轻挡一下，记下负载跳变量
+ *   5. LOAD_DELTA 取「正常峰值」和「阻挡跳变」之间偏大的位置，填回顶部重烧
+ *   6. 串口 d<新值> 可以现场试，不用重新烧
  */
 /*
  * 读串口里紧跟着的一串数字，用来实现 c850 这类带参数的调试命令。
@@ -1300,6 +1325,11 @@ void handleSerial() {
                   LOAD_CRIT, LOAD_RECOVER, (unsigned)LOAD_CRIT_MS, LOAD_DELTA, MOVE_TIME);
     Serial.printf("看门狗:  宽限=%ums 断流=%ums 容差=%u°（读不到回包也能判顶住）\n",
                   (unsigned)WD_GRACE_MS, (unsigned)TELEM_LOST_MS, ARRIVE_TOL);
+    // 每条指令执行过程中的负载突变峰值。标定 LOAD_DELTA 就看这一行：
+    // 正常快速动作的峰值必须**低于**阈值，撞上/顶住的跳变必须**高于**阈值。
+    Serial.print("突变峰值: ");
+    for (int i = 0; i < NUM; i++) Serial.printf("%s=%u ", NAMES[i], deltaPeak[i]);
+    Serial.println();
 
     // 遥测读失败的累计次数。0 才是正常；堵转时如果它一直涨，
     // 说明保护看不到负载，问题在总线而不是阈值。
