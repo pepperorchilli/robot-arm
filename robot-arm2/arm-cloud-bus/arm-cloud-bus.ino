@@ -179,6 +179,13 @@ uint16_t LOAD_RECOVER = 300;   // 掉到 30% 以下才算负载真解除，计�
 const uint32_t LOAD_WARN_MS = 10000;
 uint32_t LOAD_CRIT_MS = 3000;  // 负载 ≥ LOAD_CRIT 持续这么久才动手
 
+// ---- 命令看门狗（坑 14 的修法）----
+// 满载堵转时被顶住那颗舵机**停止回包**，所以不能指望它的负载读数。
+// 换成不需要它配合的判据：指令发下去，目标位置迟迟不到达就算顶住了。
+const uint16_t ARRIVE_TOL    = 6;     // 差 6° 以内算到位（舵机有虚位、重力会压出几度）
+uint32_t WD_GRACE_MS = 1200;          // 超过 MOVE_TIME 再宽限这么久（串口 w<毫秒> 可调）
+const uint32_t TELEM_LOST_MS = 1500;  // 遥测断这么久 = 无法确认，按顶住处理
+
 // ==================== STS/SCS 协议寄存器 ====================
 #define REG_TORQUE_ENABLE  0x28
 #define REG_GOAL_POSITION  0x2A
@@ -251,6 +258,13 @@ uint16_t telemFail[NUM];
 // 每满 TELEMFAIL_REPORT 次往服务器发一条事件，远在局域网的这头也能看见。
 uint16_t telemFailStreak[NUM];
 #define TELEMFAIL_REPORT 20
+
+// 命令看门狗的状态。每个关节一份 —— 一个关节顶住了，别的照常动。
+uint8_t  lastGoodAngle[NUM];   // 最后一次读到的滑块角度（0~180）
+uint32_t lastGoodMs[NUM];      // 最后一次读成功的时间，0 = 还没读到过
+uint8_t  moveGoal[NUM];        // 当前这道指令要去哪（target 的快照）
+uint32_t moveStartMs[NUM];     // 这道指令发出的时刻，0 = 没有待达成的移动
+bool     wdHeld[NUM];          // 这一轮已经钉住过了，别重复报
 
 // 到位回报：发完指令后等 MOVE_TIME 再回报，避免高频刷屏
 bool reportPending = false;
@@ -561,6 +575,10 @@ void pollJoint() {
   uint8_t i = pollIdx;
   pollIdx = (pollIdx + 1) % NUM;
 
+  // 看门狗放在读之前：它的存在意义就是「读不到也要能判断」，
+  // 要是跟在读后面，读取失败时它也跟着被跳过，等于没加。
+  checkMoveWatchdog(i);
+
   uint8_t t[REG_TELEM_LEN];
   // 读失败重试一次再放弃。实测失败率约 5%（回包开头偶尔被总线抢线顶坏，
   // 见上面 busRelease 那段说明），而保护是**按持续时间**判的 —— 丢一帧
@@ -603,6 +621,11 @@ void pollJoint() {
   // **bit 10（0x400）才是方向位**。不是最高位 —— 最高位在这颗舵机上
   // 恒为 0，按最高位判方向会永远判成"逆时针"。
   uint16_t mag = rawLoad & LOAD_MASK;
+
+  // 记下「最后一次看到的真实位置」。看门狗全靠它：
+  // 一旦读数断流，就用这里的位置当"停在原地"的目标。
+  lastGoodAngle[i] = posToAngle(i, pos);
+  lastGoodMs[i]    = millis();
 
   // ---- 上报遥测：原始值，不做换算 ----
   // 电压 ×0.1V、电流 ×6.5mA 这些单位换算全放在服务器做。
@@ -833,6 +856,79 @@ void checkOverload(uint8_t i, uint16_t mag, uint16_t pos) {
                   NAMES[i], mag, LOAD_CRIT, hold);
     ws.sendTXT("E:stall," + String(i) + "," + String(mag));
   }
+}
+
+/* ==================== 命令看门狗 ====================
+ *
+ * 坑 14：真堵转时，被顶住那颗舵机在满负载下**停止回包**。
+ * 于是基于它负载读数的 checkOverload() 拿不到输入 ——
+ * 「持续 3 秒」永远凑不满，保护形同虚设（真机实测 25 秒 168 次读失败）。
+ *
+ * 换一个**不需要舵机配合**的判据：
+ *
+ *   指令发下去 → 过了 MOVE_TIME + 宽限还没到位   → 认定被顶住了
+ *              或该关节遥测整个断了              → 没法确认，也按顶住处理
+ *
+ * 两者都指向同一个安全动作：把目标钉在**最后已知位置**，
+ * 舵机就不用再使劲了。通信失效本身就是信号，这比等它回话靠谱。
+ *
+ * 为什么用「没到位」而不是「没动」：舵机被顶住时位置会有零点几度的
+ * 抖动，判"没动"容易被抖动骗过去；判"没到目标"只需要一个终点条件。
+ */
+void checkMoveWatchdog(uint8_t i) {
+  uint32_t now = millis();
+
+  // 目标变了 = 来了一条新指令（过载钉住、碰撞回退改 target 也一样），重新起表。
+  if (target[i] != moveGoal[i]) {
+    moveGoal[i]    = target[i];
+    moveStartMs[i] = now;
+    wdHeld[i]      = false;
+  }
+
+  if (moveStartMs[i] == 0) return;    // 没有待达成的移动
+  if (lastGoodMs[i] == 0) return;     // 开机还没读到过，无从判断
+  if (wdHeld[i]) return;              // 这一轮已经钉过了，等用户下一条指令
+
+  // 夹持中的夹爪另有逻辑（负载到顶就锁住），别在这里掺和
+  if (i == GRIPPER && gripActive) return;
+
+  // 松力状态下舵机本来就不出力，"没到位"是正常的，不能算堵转
+  if (!torqueOn) {
+    moveStartMs[i] = 0;
+    return;
+  }
+
+  int diff = (int)lastGoodAngle[i] - (int)moveGoal[i];
+  bool arrived = (diff <= ARRIVE_TOL && diff >= -ARRIVE_TOL);
+  if (arrived) {
+    moveStartMs[i] = 0;               // 到位了，这道指令结束
+    return;
+  }
+
+  uint32_t elapsed  = now - moveStartMs[i];
+  bool     timedOut = elapsed > (uint32_t)MOVE_TIME + WD_GRACE_MS;
+  bool     telemLost = (now - lastGoodMs[i]) > TELEM_LOST_MS;
+  if (!timedOut && !telemLost) return;
+
+  // ---- 认定被顶住：钉在最后已知位置 ----
+  uint8_t goal = moveGoal[i];          // 先留一份：下面会被 hold 覆盖
+  uint8_t hold = lastGoodAngle[i];
+  target[i]      = hold;
+  prevTarget[i]  = hold;
+  moveGoal[i]    = hold;
+  moveStartMs[i] = now;
+  wdHeld[i]      = true;
+  applyTargets();
+
+  Serial.printf("🛑 %s 指令 %d° 过了 %ums 还停在 %d°（%s）→ 停在当前位置\n",
+                NAMES[i], (int)goal, elapsed, hold,
+                telemLost ? "遥测已断，无法确认" : "未到位");
+  ws.sendTXT("E:stall," + String(i) + "," + String(lastLoad[i]));
+
+  // 同一轮里 loadCritSince 也该清掉：这次不是靠它判的，
+  // 不清的话下一次真高负载会带着旧起点立刻触发。
+  loadCritSince[i] = 0;
+  loadHeld[i]      = false;
 }
 
 // ==================== WebSocket ====================
@@ -1166,6 +1262,22 @@ void handleSerial() {
     return;
   }
 
+  // 'w' —— 看门狗宽限时间（毫秒）。压到很小可以让**正常动作**判成"没到位"，
+  //        用来验证"没到位 → 钉住"这条链，全程零负载、不用顶舵机。
+  if (c == 'w') {
+    long v = readSerialNumber();
+    if (v < 0) {
+      Serial.printf("用法: w<毫秒>  当前宽限=%ums（可设 10~60000）\n",
+                    (unsigned)WD_GRACE_MS);
+      return;
+    }
+    WD_GRACE_MS = (uint32_t)constrain(v, 10, 60000);
+    Serial.printf("看门狗宽限: %ums（到位判据 = 动作时间 + 宽限）\n",
+                  (unsigned)WD_GRACE_MS);
+    for (int i = 0; i < NUM; i++) { moveStartMs[i] = 0; wdHeld[i] = false; }
+    return;
+  }
+
   // 'S' —— 连接状态。网页上"拖滑块没反应"时，先用它判断卡在哪一段：
   //       WiFi 没连 / 服务器没连 / 连上了但扭矩被保护松掉了。
   if (c == 'S' || c == 's') {
@@ -1186,6 +1298,8 @@ void handleSerial() {
     // 阈值是运行时可改的，这里每次都打出来：改完忘了改回去是最容易犯的错
     Serial.printf("保护:    过载临界=%u 解除=%u 持续=%ums  碰撞突变=%u  动作=%dms\n",
                   LOAD_CRIT, LOAD_RECOVER, (unsigned)LOAD_CRIT_MS, LOAD_DELTA, MOVE_TIME);
+    Serial.printf("看门狗:  宽限=%ums 断流=%ums 容差=%u°（读不到回包也能判顶住）\n",
+                  (unsigned)WD_GRACE_MS, (unsigned)TELEM_LOST_MS, ARRIVE_TOL);
 
     // 遥测读失败的累计次数。0 才是正常；堵转时如果它一直涨，
     // 说明保护看不到负载，问题在总线而不是阈值。
