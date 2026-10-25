@@ -246,6 +246,11 @@ bool     loadHeld[NUM];        // 已经为这一轮堵转把目标钉在当前�
 // 遥测读取失败的累计次数（开机以来）。堵转时如果这个数在涨，
 // 说明「保护没触发」不是阈值问题，而是根本读不到负载 —— 两种情况修法完全不同。
 uint16_t telemFail[NUM];
+// 连续失败次数（读成功就清零）。堵转时如果这个数一直涨，说明舵机在
+// 满负载下干脆不回包了 —— 那过载保护就永远等不到「持续 3 秒」。
+// 每满 TELEMFAIL_REPORT 次往服务器发一条事件，远在局域网的这头也能看见。
+uint16_t telemFailStreak[NUM];
+#define TELEMFAIL_REPORT 20
 
 // 到位回报：发完指令后等 MOVE_TIME 再回报，避免高频刷屏
 bool reportPending = false;
@@ -566,8 +571,26 @@ void pollJoint() {
     // 两次都失败就跳过这轮。不要拿旧值硬凑 —— 会解出假的负载突变。
     // 计数留着事后看：S 命令会打出来。
     if (telemFail[i] < 65535) telemFail[i]++;
+    if (telemFailStreak[i] < 65535) telemFailStreak[i]++;
+    // 连续失败满一轮就上报一次。只报第一轮和之后每满一轮 ——
+    // 这个数在涨，就等于"负载读数断了"，过载保护再怎么调阈值都没用。
+    if (telemFailStreak[i] == TELEMFAIL_REPORT) {
+      Serial.printf("📡 %s 连续 %u 次读不到（负载已失去监视）\n",
+                    NAMES[i], telemFailStreak[i]);
+      ws.sendTXT("E:telemfail," + String(i) + "," + String(telemFailStreak[i]));
+    } else if (telemFailStreak[i] % (TELEMFAIL_REPORT * 10) == 0) {
+      ws.sendTXT("E:telemfail," + String(i) + "," + String(telemFailStreak[i]));
+    }
     spikeCnt[i] = 0;
     return;
+  }
+  if (telemFailStreak[i]) {
+    if (telemFailStreak[i] >= TELEMFAIL_REPORT) {
+      Serial.printf("📡 %s 恢复（连续 %u 次失败后重新读到）\n",
+                    NAMES[i], telemFailStreak[i]);
+      ws.sendTXT("E:telemok," + String(i) + "," + String(telemFailStreak[i]));
+    }
+    telemFailStreak[i] = 0;
   }
 
   uint16_t pos     = t[TELEM_POS]     | (t[TELEM_POS + 1] << 8);
@@ -771,6 +794,9 @@ void checkOverload(uint8_t i, uint16_t mag, uint16_t pos) {
   if (loadCritSince[i] == 0) {          // 刚顶上去，先看满 3 秒
     loadCritSince[i] = now;
     Serial.printf("⏱ %s 负载 %u ≥ %u，开始计时\n", NAMES[i], mag, LOAD_CRIT);
+    // 也发一份到服务器：串口只有在电脑边上才看得到，
+    // 而"计时开始却没等到动作"正是最难查的那种情况。
+    ws.sendTXT("E:loadtimer," + String(i) + "," + String(mag));
     return;
   }
   if (now - loadCritSince[i] < LOAD_CRIT_MS) return;
