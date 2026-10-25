@@ -139,7 +139,7 @@ int MOVE_TIME = 400;
 #define LOAD_ERR        0xFFFF   // 读寄存器失败时的返回值
 #define LOAD_MASK       0x03FF   // 负载只有低 10 位是数值，见下面 pollJoint 的说明
 
-const uint16_t LOAD_DELTA = 250;  // 负载「突变」阈值，不是绝对阈值（需标定）
+uint16_t LOAD_DELTA = 250;  // 负载「突变」阈值，不是绝对阈值（需标定，串口 d<数字> 可现场改）
 const uint16_t LOAD_FLOOR = 120;  // 低于此值视为空载抖动，不判碰撞
 const uint8_t  SPIKE_NEED = 2;    // 连续 N 次超阈值才认定，防单次抖动误报
 
@@ -169,11 +169,15 @@ const uint16_t VOLT_STOP = 100;     // 10.0V：整机同时使劲会拉到 10V �
 //   负载寄存器的值正比于位置误差，所以"硬顶自己机械限位"反而不高
 //   （只差 24 个计数，实测才 144）——只有被**外部**卡住、误差消不掉才会满量程。
 //   中间那段留白就是"正常但吃力"：搬东西、横伸托举大概落在 200~500。
-const uint16_t LOAD_WARN    = 600;   // 60%：持续 10 秒只报警，不做动作
-const uint16_t LOAD_CRIT    = 850;   // 85%：接近实测堵转值 1000，必须处理
-const uint16_t LOAD_RECOVER = 300;   // 掉到 30% 以下才算负载真解除，计时归零
+//
+// ⚠️ 下面四个**运行时可变**（不再加 const）：串口 c / k / m 三个命令可以现场改，
+//    不用重烧。改完的代价是可能忘了改回去 —— 所以 S 命令会把当前值打出来，
+//    每次查连接状态都提醒一遍。
+uint16_t LOAD_WARN    = 600;   // 60%：持续 10 秒只报警，不做动作
+uint16_t LOAD_CRIT    = 850;   // 85%：接近实测堵转值 1000，必须处理
+uint16_t LOAD_RECOVER = 300;   // 掉到 30% 以下才算负载真解除，计时归零
 const uint32_t LOAD_WARN_MS = 10000;
-const uint32_t LOAD_CRIT_MS = 3000;
+uint32_t LOAD_CRIT_MS = 3000;  // 负载 ≥ LOAD_CRIT 持续这么久才动手
 
 // ==================== STS/SCS 协议寄存器 ====================
 #define REG_TORQUE_ENABLE  0x28
@@ -239,6 +243,9 @@ uint32_t loadWarnSince[NUM];   // 进入 ≥LOAD_WARN 的时刻，0 = 没在计�
 uint32_t loadCritSince[NUM];   // 进入 ≥LOAD_CRIT 的时刻
 bool     loadWarned[NUM];      // 这一轮高负载已经报过了，别刷屏
 bool     loadHeld[NUM];        // 已经为这一轮堵转把目标钉在当前位置了
+// 遥测读取失败的累计次数（开机以来）。堵转时如果这个数在涨，
+// 说明「保护没触发」不是阈值问题，而是根本读不到负载 —— 两种情况修法完全不同。
+uint16_t telemFail[NUM];
 
 // 到位回报：发完指令后等 MOVE_TIME 再回报，避免高频刷屏
 bool reportPending = false;
@@ -550,8 +557,15 @@ void pollJoint() {
   pollIdx = (pollIdx + 1) % NUM;
 
   uint8_t t[REG_TELEM_LEN];
-  if (!readTelemetry(SERVO_ID[i], t, REG_TELEM_LEN)) {
-    // 读失败就跳过这轮。不要拿旧值硬凑 —— 会解出假的负载突变。
+  // 读失败重试一次再放弃。实测失败率约 5%（回包开头偶尔被总线抢线顶坏，
+  // 见上面 busRelease 那段说明），而保护是**按持续时间**判的 —— 丢一帧
+  // 只是少一次采样，但连续丢就会让「持续 3 秒高负载」永远凑不满。
+  bool ok = readTelemetry(SERVO_ID[i], t, REG_TELEM_LEN) ||
+            readTelemetry(SERVO_ID[i], t, REG_TELEM_LEN);
+  if (!ok) {
+    // 两次都失败就跳过这轮。不要拿旧值硬凑 —— 会解出假的负载突变。
+    // 计数留着事后看：S 命令会打出来。
+    if (telemFail[i] < 65535) telemFail[i]++;
     spikeCnt[i] = 0;
     return;
   }
@@ -1051,6 +1065,32 @@ void setup() {
  *
  * 标定期间把 ENABLE_COLLISION 设 0，避免误触发干扰观察。
  */
+/*
+ * 读串口里紧跟着的一串数字，用来实现 c850 这类带参数的调试命令。
+ *
+ * 只在**已经读到命令字母之后**调用：数字是连着敲进来的，正常几个毫秒就读完。
+ * 超时设 300ms 而不是更长 —— 这段是阻塞的，卡太久 ws.loop() 得不到调用，
+ * 服务器心跳会断。
+ *
+ * 返回 -1 表示后面没有数字（用户只敲了字母就回车）。
+ */
+long readSerialNumber() {
+  long v = -1;
+  uint32_t last = millis();
+  while (millis() - last < 300) {
+    if (!Serial.available()) { delay(2); continue; }
+    char ch = Serial.read();
+    last = millis();
+    if (ch >= '0' && ch <= '9') {
+      if (v < 0) v = 0;
+      if (v < 100000) v = v * 10 + (ch - '0');
+    } else {
+      break;                       // 回车、空格、其它字母都算结束
+    }
+  }
+  return v;
+}
+
 void handleSerial() {
   if (!Serial.available()) return;
   char c = Serial.read();
@@ -1064,6 +1104,39 @@ void handleSerial() {
       writeWord(SERVO_ID[i], REG_GOAL_TIME, (uint16_t)MOVE_TIME);
     }
     Serial.printf("动作速度: %d ms/段（1=快 2=中 3=慢 4=很慢）\n", MOVE_TIME);
+    return;
+  }
+
+  // 'c' 'k' 'm' 'd' —— 现场改保护阈值，不用重烧板子。
+  //   用法是「字母 + 数字」，数字打到回车为止：c850 / k300 / m3000 / d250
+  //   c = 过载上限（负载绝对值）      k = 负载降到多少算真解除（计时归零）
+  //   m = 持续多少毫秒才动手          d = 碰撞的负载突变阈值
+  //
+  //   为什么要有这几个：判「堵转」靠的是负载持续高，而阈值定得对不对
+  //   只有真顶死一次才知道。有了它们可以在负载小的动作上先把触发链路验一遍
+  //   （c100 k30 m800），不用真的把舵机顶到 1000。改完记得改回去 ——
+  //   S 命令每次都会把当前值打出来提醒。
+  if (c == 'c' || c == 'k' || c == 'm' || c == 'd') {
+    char which = c;
+    long v = readSerialNumber();
+    if (v < 0) {
+      Serial.printf("用法: %c<数字>  当前 临界=%u 解除=%u 时长=%ums 碰撞=%u\n",
+                    which, LOAD_CRIT, LOAD_RECOVER, (unsigned)LOAD_CRIT_MS, LOAD_DELTA);
+      return;
+    }
+    switch (which) {
+      case 'c': LOAD_CRIT    = (uint16_t)constrain(v, 1, 1000); break;
+      case 'k': LOAD_RECOVER = (uint16_t)constrain(v, 1, 1000); break;
+      case 'm': LOAD_CRIT_MS = (uint32_t)constrain(v, 50, 60000); break;
+      case 'd': LOAD_DELTA   = (uint16_t)constrain(v, 10, 1000); break;
+    }
+    Serial.printf("阈值已改: 临界=%u 解除=%u 时长=%ums 碰撞突变=%u\n",
+                  LOAD_CRIT, LOAD_RECOVER, (unsigned)LOAD_CRIT_MS, LOAD_DELTA);
+    // 改了阈值，正在进行中的计时按旧阈值算的，全部作废重来
+    for (int i = 0; i < NUM; i++) {
+      loadCritSince[i] = 0;
+      loadHeld[i] = false;
+    }
     return;
   }
 
@@ -1084,6 +1157,19 @@ void handleSerial() {
                   torqueOn ? "开" : "关",
                   lowbatLatch ? "是（会松力）" : "否",
                   overtempLatch ? "是" : "否");
+    // 阈值是运行时可改的，这里每次都打出来：改完忘了改回去是最容易犯的错
+    Serial.printf("保护:    过载临界=%u 解除=%u 持续=%ums  碰撞突变=%u  动作=%dms\n",
+                  LOAD_CRIT, LOAD_RECOVER, (unsigned)LOAD_CRIT_MS, LOAD_DELTA, MOVE_TIME);
+
+    // 遥测读失败的累计次数。0 才是正常；堵转时如果它一直涨，
+    // 说明保护看不到负载，问题在总线而不是阈值。
+    bool anyFail = false;
+    for (int i = 0; i < NUM; i++) if (telemFail[i]) anyFail = true;
+    if (anyFail) {
+      Serial.print("读失败:  ");
+      for (int i = 0; i < NUM; i++) Serial.printf("%s=%u ", NAMES[i], telemFail[i]);
+      Serial.println();
+    }
 
     // 台面模式自报。
     // VOLT_WARN 被临时降到台面电压（C001 走 UBEC 只有 5.1V），低压保护基本等于关掉了。
