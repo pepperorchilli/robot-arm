@@ -1,0 +1,16 @@
+# 测试依赖（E2E / 接口层）
+# 安装： uv pip install -r requirements.txt
+#
+# 注意这里没有 pytest-cov：
+#   被测系统是 Node（server.js），Python 这边只是测试脚手架。
+#   对 helpers/ 跑覆盖率，得到的是一个好看但毫无意义的百分比 ——
+#   真正的覆盖率要靠 Node 侧插桩（c8/nyc），那需要改原服务代码，暂不做。
+pytest>=8.0
+pytest-timeout>=2.3
+pytest-html>=4.1
+httpx>=0.27
+websocket-client>=1.8
+PyMySQL>=1.1
+
+# 代码风格（CI 里跑）
+ruff>=0.6

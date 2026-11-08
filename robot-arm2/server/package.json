@@ -10,7 +10,10 @@
     "dev:web": "cd web && npm run dev",
     "migrate": "node migrate.js",
     "explain": "node explain-demo.js",
-    "init-db": "mysql -u root < schema.sql"
+    "init-db": "mysql -u root < schema.sql",
+    "test": "cd tests && .venv/bin/python -m pytest",
+    "test:fast": "cd tests && .venv/bin/python -m pytest -m \"not perf\"",
+    "lint:test": "cd tests && .venv/bin/ruff check ."
   },
   "dependencies": {
     "express": "^4.19.2",

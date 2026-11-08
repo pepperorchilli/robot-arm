@@ -1,0 +1,97 @@
+name: tests
+
+on:
+  push:
+    paths:
+      - "robot-arm2/server/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支连续 push 时，取消上一次还在跑的构建
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: 集成测试（pytest）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: "3306"
+      TEST_DB_ADMIN_USER: root
+      TEST_DB_ADMIN_PASSWORD: root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: robot-arm2/server/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: robot-arm2/server/tests/requirements.txt
+
+      # 测试库和业务账号由 CI 建；表结构不在这里写，交给 conftest 从 schema.sql 派生
+      - name: 准备测试库与最小权限账号
+        run: |
+          mysql -h127.0.0.1 -uroot -proot <<'SQL'
+          CREATE DATABASE IF NOT EXISTS robot_arm_test
+            CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE USER IF NOT EXISTS 'arm_app'@'%' IDENTIFIED BY 'arm_dev_password';
+          GRANT SELECT, INSERT, UPDATE, DELETE ON robot_arm_test.* TO 'arm_app'@'%';
+          FLUSH PRIVILEGES;
+          SQL
+
+      - name: 安装服务端依赖
+        working-directory: robot-arm2/server
+        run: npm ci --omit=dev
+
+      - name: 安装测试依赖
+        working-directory: robot-arm2/server/tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 代码风格检查
+        working-directory: robot-arm2/server/tests
+        run: ruff check .
+
+      - name: 运行测试
+        working-directory: robot-arm2/server/tests
+        run: |
+          mkdir -p reports
+          pytest -v \
+            --junitxml=reports/junit.xml \
+            --html=reports/report.html --self-contained-html
+
+      # 失败时最想看的是被测服务自己的日志
+      - name: 上传报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            robot-arm2/server/tests/reports/
+          retention-days: 14

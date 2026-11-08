@@ -1,0 +1,20 @@
+target-version = "py311"
+line-length = 100
+exclude = [".venv", "reports", "__pycache__"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes（未使用的导入、未定义的名字）
+    "I",    # import 排序
+    "UP",   # pyupgrade（用新语法）
+    "B",    # bugbear（容易写出 bug 的写法）
+    "SIM",  # 可以简化的写法
+]
+ignore = [
+    "E501",  # 行长由 formatter 负责，lint 不重复报
+]
+
+[lint.per-file-ignores]
+"conftest.py" = ["E402"]
