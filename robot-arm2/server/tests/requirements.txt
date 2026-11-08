@@ -10,7 +10,10 @@ pytest-timeout>=2.3
 pytest-html>=4.1
 httpx>=0.27
 websocket-client>=1.8
-PyMySQL>=1.1
+# [rsa] extra 会顺带装 cryptography：MySQL 8 默认的 caching_sha2_password
+# 在首次认证（服务端缓存未命中）时需要客户端做 RSA 交换，PyMySQL 缺了它
+# 会抛 RuntimeError。本机可能因缓存命中碰巧能跑，CI 是干净容器，一定会踩。
+PyMySQL[rsa]>=1.1
 
 # 代码风格（CI 里跑）
 ruff>=0.6

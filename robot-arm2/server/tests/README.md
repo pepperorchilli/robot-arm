@@ -33,6 +33,10 @@ make test
 
 表结构不用手工建：`conftest.py` 会从 `server/schema.sql` 派生并在测试库里幂等执行。
 
+`server/config.js` 含真实密码、被 `.gitignore` 排除，所以新 clone 的仓库和 CI
+里都没有这个文件。测试启动服务时会用 `config.example.js` 兜底生成一份，
+端口、库名、账号、密码全部由环境变量覆盖，占位值不会被用到。
+
 常用命令（`server/` 目录下也可以直接 `npm test` / `npm run test:fast` / `npm run lint:test`）：
 
 | 命令 | 用途 |

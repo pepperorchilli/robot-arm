@@ -90,16 +90,39 @@ def prepared_database() -> None:
     db.ensure_schema()
 
 
+def _ensure_server_config() -> None:
+    """server.js 启动时 require('./config')，而 config.js 被 .gitignore 排除。
+
+    它里面是真实密码，本来就不该入库 —— 但这意味着**刚 clone 下来的仓库
+    和 CI 环境里没有这个文件**，服务会直接 MODULE_NOT_FOUND 退出。
+
+    所以这里用 config.example.js 兜底复制一份；真正的端口、库名、密码
+    全部由下面的环境变量覆盖，模板里的占位值不会被用到。
+    """
+    config_file = SERVER_DIR / "config.js"
+    if not config_file.exists():
+        config_file.write_text(
+            (SERVER_DIR / "config.example.js").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+
 @pytest.fixture(scope="module")
 def server():
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
     log_path = REPORT_DIR / f"server-{port}.log"
 
+    _ensure_server_config()
+
     env = {
         **os.environ,
         "PORT": str(port),
         "BIND_HOST": "127.0.0.1",
+        "DB_HOST": str(db.DB["host"]),
+        "DB_PORT": str(db.DB["port"]),
+        "DB_USER": db.DB["user"],
+        "DB_PASSWORD": db.DB["password"],
         "DB_NAME": db.TEST_DB,
         "ESP32_TOKEN": TEST_TOKEN,
     }
